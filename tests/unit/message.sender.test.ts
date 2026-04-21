@@ -5,7 +5,8 @@ describe('MessageSender', () => {
     const whatsappService = {
         getStatus: vi.fn(),
         getSocket: vi.fn(),
-        isVerbose: vi.fn()
+        isVerbose: vi.fn(),
+        prepareGroupSession: vi.fn().mockResolvedValue(undefined)
     };
 
     beforeEach(() => {

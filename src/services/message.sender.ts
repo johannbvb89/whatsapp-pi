@@ -40,6 +40,7 @@ export class MessageSender {
         const maxRetries = request.options?.maxRetries ?? 3;
         let attempts = 0;
         let lastError: unknown = null;
+        const isGroup = request.recipientJid.endsWith('@g.us');
 
         while (attempts < maxRetries) {
             attempts++;
@@ -53,7 +54,12 @@ export class MessageSender {
                     throw new WhatsAppError('SOCKET_NOT_INIT', 'WhatsApp socket not initialized');
                 }
 
-                // 3. Send the message
+                // 3. Pre-load group metadata to establish sender-key sessions
+                if (isGroup) {
+                    await this.whatsappService.prepareGroupSession(request.recipientJid);
+                }
+
+                // 4. Send the message
                 // Note: Branding π is applied here to ensure consistency
                 const response = await socket.sendMessage(request.recipientJid, { 
                     text: `${request.text} π` 
@@ -73,9 +79,10 @@ export class MessageSender {
                     break;
                 }
 
-                // 4. Backoff before retry
+                // 5. Backoff before retry (longer for groups to allow session establishment)
                 if (attempts < maxRetries) {
-                    const backoff = Math.pow(2, attempts) * 1000;
+                    const baseBackoff = isGroup ? 3000 : 1000;
+                    const backoff = Math.pow(2, attempts) * baseBackoff;
                     if (this.whatsappService.isVerbose()) {
                         console.log(`[MessageSender] Retrying in ${backoff}ms...`);
                     }

@@ -59,6 +59,7 @@ interface WhatsAppSocketLike {
     sendMessage(jid: string, content: { text: string }): Promise<{ key?: { id?: string } } | undefined>;
     sendPresenceUpdate(presence: 'composing' | 'recording' | 'paused', jid: string): Promise<void>;
     readMessages(messages: Array<{ remoteJid: string; id: string; fromMe: boolean }>): Promise<void>;
+    groupMetadata(jid: string): Promise<unknown>;
 }
 
 interface LastDisconnectLike {
@@ -515,6 +516,23 @@ export class WhatsAppService {
         }
 
         return this.socket;
+    }
+
+    /**
+     * Pre-loads group metadata to establish Signal sender-key sessions.
+     * This prevents "No sessions" errors on first send to a group.
+     */
+    public async prepareGroupSession(jid: string): Promise<void> {
+        if (!jid.endsWith('@g.us')) return;
+        const socket = this.getActiveSocket();
+        if (!socket) return;
+        try {
+            await socket.groupMetadata(jid);
+        } catch (error) {
+            if (this.verboseMode) {
+                console.error(`[WhatsApp-Pi] Failed to pre-load group metadata for ${jid}:`, error);
+            }
+        }
     }
 
     async sendMessage(jid: string, text: string) {
