@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetI18n } from '../../src/i18n.js';
 import { showMessageReplyView } from '../../src/ui/message-reply.view.js';
 
 const createContext = (edits: Array<string | undefined>) => {
@@ -15,6 +16,7 @@ const createContext = (edits: Array<string | undefined>) => {
 
 describe('showMessageReplyView', () => {
     beforeEach(() => {
+        resetI18n();
         vi.clearAllMocks();
         vi.spyOn(Date, 'now').mockReturnValue(1234567890);
     });

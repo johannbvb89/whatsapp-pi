@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetI18n } from '../../src/i18n.js';
 import { join } from 'node:path';
 
 const mocks = vi.hoisted(() => ({
@@ -45,6 +46,7 @@ const setupService = () => new AudioService();
 
 describe('AudioService', () => {
     beforeEach(() => {
+        resetI18n();
         vi.clearAllMocks();
         vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.spyOn(Date, 'now').mockReturnValue(1234567890);

@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { resetI18n } from '../../src/i18n.js';
 import { extractIncomingText } from '../../src/services/incoming-message.resolver.js';
 
 describe('extractIncomingText', () => {
+    beforeEach(() => {
+        resetI18n();
+    });
+
     it('extracts plain conversation text', () => {
         expect(extractIncomingText({ conversation: 'hello' })).toEqual({
             kind: 'text',

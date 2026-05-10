@@ -1,5 +1,6 @@
 import { matchesKey, truncateToWidth, wrapTextWithAnsi, visibleWidth } from '@mariozechner/pi-tui';
 import type { SelectedMessageContext } from '../models/whatsapp.types.js';
+import { t } from '../i18n.js';
 
 export interface MessageDetailViewProps extends SelectedMessageContext {
     title: string;
@@ -32,19 +33,20 @@ export class MessageDetailView {
     }
 
     render(width: number): string[] {
-        const bodyText = this.props.text.length > 0 ? this.props.text : '[No readable text available]';
+        const title = this.props.title.trim() || t('message.detail.defaultTitle');
+        const bodyText = this.props.text.length > 0 ? this.props.text : t('message.detail.noReadableText');
 
         const availableWidth = Math.max(20, width - 4);
         const rawHeaderLines = [
-            `Message ID: ${this.props.messageId}`,
-            `From: ${this.formatSender()}`,
-            `Direction: ${this.formatDirection()} • Time: ${this.formatTimestamp(this.props.timestamp)}`
+            `${t('message.detail.messageId')}: ${this.props.messageId}`,
+            `${t('message.detail.from')}: ${this.formatSender()}`,
+            `${t('message.detail.direction')}: ${this.formatDirection()} • ${t('message.detail.time')}: ${this.formatTimestamp(this.props.timestamp)}`
         ];
 
         const contentWidth = Math.min(
             availableWidth,
             Math.max(
-                visibleWidth('Press Enter or Esc to return'),
+                visibleWidth(t('message.detail.hint.close')),
                 ...rawHeaderLines.map(line => visibleWidth(line)),
                 ...wrapTextWithAnsi(bodyText, availableWidth).map(line => visibleWidth(line))
             )
@@ -65,8 +67,8 @@ export class MessageDetailView {
         const bottomBorder = `╰${'─'.repeat(boxWidth - 2)}╯`;
         const bodyLines = wrapTextWithAnsi(bodyText, wrapWidth).filter(line => line.length > 0 || bodyText.length === 0);
         const exitHint = this.props.onReply
-            ? `\x1b[90mPress R to reply • Enter or Esc to return\x1b[39m`
-            : `\x1b[90mPress Enter or Esc to return\x1b[39m`;
+            ? `\x1b[90m${t('message.detail.hint.replyOrClose')}\x1b[39m`
+            : `\x1b[90m${t('message.detail.hint.close')}\x1b[39m`;
 
         return [
             topBorder,
@@ -88,7 +90,7 @@ export class MessageDetailView {
     }
 
     private formatDirection(): string {
-        return this.props.direction === 'outgoing' ? 'Sent' : 'Received';
+        return this.props.direction === 'outgoing' ? t('message.detail.direction.sent') : t('message.detail.direction.received');
     }
 
     private formatTimestamp(timestamp: number): string {

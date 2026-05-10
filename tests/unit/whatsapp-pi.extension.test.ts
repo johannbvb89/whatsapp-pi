@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetI18n } from '../../src/i18n.js';
 
 const mocks = vi.hoisted(() => {
     const createSessionManager = () => ({
@@ -147,6 +148,8 @@ const loadExtension = async () => {
 
 describe('whatsapp-pi extension', () => {
     beforeEach(() => {
+        resetI18n();
+        vi.stubEnv('WHATSAPP_PI_LOCALE', '');
         mocks.reset();
         vi.clearAllMocks();
         vi.spyOn(console, 'log').mockImplementation(() => {});

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetI18n } from '../../src/i18n.js';
 
 const baileysMocks = vi.hoisted(() => {
     const sockets: any[] = [];
@@ -62,6 +63,7 @@ const createSessionManager = () => ({
 
 describe('WhatsAppService auth failure handling', () => {
     beforeEach(() => {
+        resetI18n();
         baileysMocks.reset();
         vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.spyOn(console, 'log').mockImplementation(() => {});

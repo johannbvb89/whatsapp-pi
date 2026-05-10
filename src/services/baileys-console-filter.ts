@@ -1,11 +1,13 @@
 type ConsoleMethod = 'log' | 'info' | 'warn' | 'error';
 
+import { t } from '../i18n.js';
+
 const noisyBaileysPatterns = [
-    'Failed to decrypt message with any known session',
-    'Session error:',
-    'Bad MAC',
-    'Closing open session in favor of incoming prekey bundle',
-    'Closing session:'
+    t('baileys.filter.failedDecrypt'),
+    t('baileys.filter.sessionError'),
+    t('baileys.filter.badMac'),
+    t('baileys.filter.closingOpenSession'),
+    t('baileys.filter.closingSession')
 ];
 
 const stringifyConsolePart = (part: unknown): string => {

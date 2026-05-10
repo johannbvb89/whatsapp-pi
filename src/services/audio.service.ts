@@ -5,6 +5,7 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { t } from '../i18n.js';
 
 const execAsync = promisify(exec);
 
@@ -45,10 +46,10 @@ export class AudioService {
                 return text.trim();
             }
 
-            return '[Empty transcription]';
+            return t('audio.emptyTranscription');
         } catch (error) {
-            console.error('[AudioService] Transcription error:', error);
-            return `[Transcription error: ${error instanceof Error ? error.message : String(error)}]`;
+            console.error(t('audio.transcriptionError'), error);
+            return t('audio.transcriptionErrorResult', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 }

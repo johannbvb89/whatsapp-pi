@@ -1,5 +1,6 @@
 import { WhatsAppService } from './whatsapp.service.js';
 import { MessageRequest, MessageResult, WhatsAppError } from '../models/whatsapp.types.js';
+import { t } from '../i18n.js';
 import { appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -33,7 +34,7 @@ export class MessageSender {
         const start = Date.now();
         while (this.whatsappService.getStatus() !== 'connected') {
             if (Date.now() - start > timeoutMs) {
-                throw new WhatsAppError('TIMEOUT', 'Timed out waiting for WhatsApp connection');
+                throw new WhatsAppError('TIMEOUT', t('message.sender.timeout'));
             }
             await this.sleep(1000);
         }
@@ -61,7 +62,7 @@ export class MessageSender {
                 // 2. Get active socket
                 const socket = this.whatsappService.getSocket();
                 if (!socket) {
-                    throw new WhatsAppError('SOCKET_NOT_INIT', 'WhatsApp socket not initialized');
+                    throw new WhatsAppError('SOCKET_NOT_INIT', t('message.sender.socketNotInitialized'));
                 }
 
                 // 3. Pre-load group metadata on first attempt
@@ -83,9 +84,11 @@ export class MessageSender {
                 };
             } catch (error: unknown) {
                 lastError = error;
-                const errorMsg = error instanceof Error ? error.message : String(error);
-                fileLog(`Attempt ${attempts}/${maxRetries} FAILED for ${request.recipientJid}: ${errorMsg}`);
-                console.error(`[MessageSender] Attempt ${attempts} failed for ${request.recipientJid}: ${errorMsg}`);
+                console.error(t('message.sender.attemptFailed', {
+                    attempt: attempts,
+                    recipientJid: request.recipientJid,
+                    error: error instanceof Error ? error.message : String(error)
+                }));
                 
                 // Specific handling for non-retryable errors
                 if (error instanceof WhatsAppError && error.code === 'TIMEOUT') {
@@ -100,7 +103,7 @@ export class MessageSender {
                     const baseBackoff = (isGroup && isNoSessions) ? 5000 : 1000;
                     const backoff = Math.pow(2, attempts) * baseBackoff;
                     fileLog(`Retrying in ${backoff / 1000}s...`);
-                    console.log(`[MessageSender] Retrying in ${backoff / 1000}s...`);
+                    console.log(t('message.sender.retrying', { backoff }));
                     await this.sleep(backoff);
                 }
             }
@@ -108,7 +111,7 @@ export class MessageSender {
 
         return {
             success: false,
-            error: lastError instanceof Error ? lastError.message : 'Unknown error',
+            error: lastError instanceof Error ? lastError.message : t('message.sender.unknownError'),
             attempts
         };
     }

@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetI18n } from '../../src/i18n.js';
 import { MessageDetailView } from '../../src/ui/message-detail.view.js';
 
 describe('MessageDetailView', () => {
+    beforeEach(() => {
+        resetI18n();
+    });
+
     it('renders full message context and content', () => {
         const ansiPattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
         const view = new MessageDetailView({

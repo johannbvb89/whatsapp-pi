@@ -9,6 +9,7 @@ import { SessionManager } from './session.manager.js';
 import { IncomingMessage, SessionStatus } from '../models/whatsapp.types.js';
 import { MessageSender } from './message.sender.js';
 import { installBaileysConsoleFilter } from './baileys-console-filter.js';
+import { t } from '../i18n.js';
 import { appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -270,7 +271,7 @@ export class WhatsAppService {
 
     async start(options: WhatsAppStartOptions = {}) {
         if (this.isReconnecting) return;
-        this.onStatusUpdate?.('| WhatsApp: Connecting...');
+        this.onStatusUpdate?.(t('service.whatsapp.connecting'));
 
         this.cleanupSocket();
 
@@ -330,12 +331,12 @@ export class WhatsAppService {
     private async handlePairingQr(qr: string) {
         this.sessionManager.setStatus('pairing');
         this.onQRCode?.(qr);
-        this.onStatusUpdate?.('| WhatsApp: Disconnected');
+        this.onStatusUpdate?.(t('service.whatsapp.typeToConnect'));
     }
 
     private async handleConnectionOpen() {
         if (this.verboseMode) {
-            console.log('WhatsApp connection successfully opened');
+            console.log(t('service.whatsapp.connectionOpened'));
         }
 
         this.isReconnecting = false;
@@ -344,7 +345,7 @@ export class WhatsAppService {
         await this.saveCreds?.();
         await this.sessionManager.markAuthStateAvailable();
         this.sessionManager.setStatus('connected');
-        this.onStatusUpdate?.('| WhatsApp: Connected');
+        this.onStatusUpdate?.(t('service.whatsapp.connected'));
     }
 
     private isBadMacError(errorMessage: string): boolean {
@@ -372,19 +373,19 @@ export class WhatsAppService {
         const shouldTreatAsLoggedOut = isBadMac || isAuthRejected;
 
         if (this.verboseMode) {
-            console.error(`Connection closed [${statusCode}]. Reconnecting: ${shouldReconnect}`);
+            console.error(t('service.whatsapp.connectionClosed', { statusCode: statusCode ?? 'unknown', shouldReconnect: String(shouldReconnect) }));
         }
 
         if (shouldTreatAsLoggedOut) {
             if (this.verboseMode) {
-                console.error(`Session rejected [${statusCode}] - preserving auth state`);
+                console.error(t('service.whatsapp.sessionRejected', { statusCode: statusCode ?? 'unknown' }));
             }
             if (isBadMac) {
                 if (this.verboseMode) {
-                    console.error('[WhatsApp-Pi] Bad MAC error detected. Your session keys are corrupted.');
-                    console.error('[WhatsApp-Pi] Use Logoff (Delete Session) only if reconnect keeps failing.');
+					console.error(t('service.whatsapp.badMacDetected'));
+                    console.error(t('service.whatsapp.runClearAuth'));
                 }
-                this.onStatusUpdate?.('| WhatsApp: Session Error (Bad MAC)');
+                this.onStatusUpdate?.(t('service.whatsapp.sessionErrorBadMac'));
             } else if (isAuthRejected && allowPairingOnAuthFailure) {
                 this.onStatusUpdate?.('| WhatsApp: Session Preserved (Reconnect Failed)');
             }
@@ -393,20 +394,20 @@ export class WhatsAppService {
             this.reconnectAttempts = 0;
             await this.sessionManager.setStatus('disconnected');
             if (!isBadMac) {
-                this.onStatusUpdate?.('| WhatsApp: Disconnected');
+                this.onStatusUpdate?.(t('service.whatsapp.loggedOut'));
             }
             return;
         }
 
         if (statusCode === DisconnectReason.connectionReplaced) {
             if (this.verboseMode) {
-                console.error('Connection replaced - another instance connected');
+                console.error(t('service.whatsapp.connectionReplaced'));
             }
             this.cleanupSocket();
             this.isReconnecting = false;
             this.reconnectAttempts = 0;
             await this.sessionManager.setStatus('disconnected');
-            this.onStatusUpdate?.('| WhatsApp: Conflict (Another Instance)');
+            this.onStatusUpdate?.(t('service.whatsapp.conflict'));
             return;
         }
 
@@ -414,7 +415,7 @@ export class WhatsAppService {
             this.isReconnecting = true;
             this.reconnectAttempts++;
             const reconnectDelayMs = this.getReconnectDelayMs();
-            this.onStatusUpdate?.('| WhatsApp: Reconnecting...');
+            this.onStatusUpdate?.(t('service.whatsapp.reconnecting'));
             this.clearReconnectTimeout();
             await this.saveCreds?.();
             this.cleanupSocket();
@@ -425,7 +426,7 @@ export class WhatsAppService {
         } else if (!shouldReconnect) {
             this.reconnectAttempts = 0;
             this.sessionManager.setStatus('logged-out');
-            this.onStatusUpdate?.('| WhatsApp: Disconnected');
+            this.onStatusUpdate?.(t('service.whatsapp.disconnected'));
         }
     }
 
@@ -459,7 +460,7 @@ export class WhatsAppService {
             timestamp: this.getIncomingTimestamp(message.messageTimestamp)
         })).catch(error => {
             if (this.verboseMode) {
-                console.error('Failed to record recent message:', error);
+                console.error(t('service.whatsapp.failedRecordRecentMessage'), error);
             }
         });
     }
@@ -575,7 +576,7 @@ export class WhatsAppService {
         await this.sendPresence(jid, 'paused');
 
         if (!result.success) {
-            console.error(`Failed to send message to ${jid}: ${result.error}`);
+            console.error(t('service.whatsapp.failedSendMessage', { jid, error: result.error ?? t('message.sender.unknownError') }));
         }
 
         return result;
@@ -588,7 +589,7 @@ export class WhatsAppService {
         if (!socket) {
             return {
                 success: false,
-                error: 'WhatsApp is not connected',
+                error: t('service.whatsapp.notConnected'),
                 attempts: 0
             };
         }
@@ -605,7 +606,7 @@ export class WhatsAppService {
             };
         } catch (error: unknown) {
             await this.sendPresence(normalizedJid, 'paused');
-            console.error(`Failed to send menu message to ${normalizedJid}:`, error);
+            console.error(t('service.whatsapp.failedSendMenuMessage', { jid: normalizedJid }), error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
@@ -621,7 +622,7 @@ export class WhatsAppService {
             await socket.sendPresenceUpdate(presence, jid);
         } catch (error) {
             if (this.verboseMode) {
-                console.error(`Failed to send presence update to ${jid}:`, error);
+                console.error(t('service.whatsapp.failedPresenceUpdate', { jid }), error);
             }
         }
     }
@@ -633,7 +634,7 @@ export class WhatsAppService {
             await socket.readMessages([{ remoteJid: jid, id: messageId, fromMe }]);
         } catch (error) {
             if (this.verboseMode) {
-                console.error(`Failed to mark message as read:`, error);
+                console.error(t('service.whatsapp.failedMarkRead'), error);
             }
         }
     }
@@ -648,13 +649,13 @@ export class WhatsAppService {
             await this.saveCreds?.();
         } catch (error) {
             if (this.verboseMode) {
-                console.error('Failed to persist auth state during stop:', error);
+                console.error(t('service.whatsapp.failedPersistAuthState'), error);
             }
         }
 
         this.cleanupSocket();
         this.isReconnecting = false;
         await this.sessionManager.setStatus('disconnected');
-        this.onStatusUpdate?.('| WhatsApp: Disconnected');
+        this.onStatusUpdate?.(t('service.whatsapp.disconnected'));
     }
 }

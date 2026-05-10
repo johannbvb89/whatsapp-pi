@@ -6,6 +6,7 @@ import { showMessageDetailView } from './message-detail.view.js';
 import { showMessageReplyView } from './message-reply.view.js';
 import * as qrcode from 'qrcode-terminal';
 import type { ExtensionCommandContext } from '@mariozechner/pi-coding-agent';
+import { t } from '../i18n.js';
 
 interface HistoryOptionEntry {
     label: string;
@@ -24,60 +25,67 @@ export class MenuHandler {
     async handleCommand(ctx: ExtensionCommandContext) {
         const status = this.whatsappService.getEffectiveStatus();
         const registered = await this.sessionManager.isRegistered();
+        const title = t('menu.whatsapp.title', { status });
+        const recentsLabel = t('menu.root.recents');
+        const allowedNumbersLabel = t('menu.root.allowedNumbers');
+        const blockedNumbersLabel = t('menu.root.blockedNumbers');
+        const disconnectWhatsAppLabel = t('menu.root.disconnectWhatsApp');
+        const connectWhatsAppLabel = t('menu.root.connectWhatsApp');
+        const logoffDeleteSessionLabel = t('menu.root.logoffDeleteSession');
+        const backLabel = t('menu.root.back');
         const options: string[] = [];
 
         if (status === 'connected') {
-            options.push('Recents');
-            options.push('Allowed Numbers');
-            options.push('Blocked Numbers');
-            options.push('Disconnect WhatsApp');
+            options.push(recentsLabel);
+            options.push(allowedNumbersLabel);
+            options.push(blockedNumbersLabel);
+            options.push(disconnectWhatsAppLabel);
         } else {
-            options.push('Connect WhatsApp');
+            options.push(connectWhatsAppLabel);
         }
 
         if (registered) {
-            options.push('Logoff (Delete Session)');
+            options.push(logoffDeleteSessionLabel);
         }
 
-        options.push('Back');
+        options.push(backLabel);
 
-        const choice = await ctx.ui.select(`WhatsApp (Status: ${status})`, options);
+        const choice = await ctx.ui.select(title, options);
 
         switch (choice) {
-            case 'Connect WhatsApp':
+            case connectWhatsAppLabel:
                 if (status === 'connected') {
-                    ctx.ui.notify('WhatsApp is already connected', 'info');
+                    ctx.ui.notify(t('menu.root.alreadyConnected'), 'info');
                     break;
                 }
                 this.whatsappService.setQRCodeCallback((qr) => {
                     qrcode.generate(qr, { small: true });
                 });
                 await this.whatsappService.start();
-                ctx.ui.notify(registered ? 'WhatsApp Reconnect Started' : 'WhatsApp Pairing Started', 'info');
+                ctx.ui.notify(registered ? t('menu.root.reconnectStarted') : t('menu.root.pairingStarted'), 'info');
                 break;
-            case 'Disconnect WhatsApp':
+            case disconnectWhatsAppLabel:
                 if (status !== 'connected') {
-                    ctx.ui.notify('WhatsApp is already disconnected', 'info');
+                    ctx.ui.notify(t('menu.root.alreadyDisconnected'), 'info');
                     break;
                 }
                 await this.whatsappService.stop();
-                ctx.ui.notify('WhatsApp Agent Disconnected', 'warning');
+                ctx.ui.notify(t('menu.root.agentDisconnected'), 'warning');
                 break;
-            case 'Logoff (Delete Session)': {
-                const confirmLogoff = await ctx.ui.confirm('Logoff', 'Delete all credentials?');
+            case logoffDeleteSessionLabel:
+                const confirmLogoff = await ctx.ui.confirm(t('menu.root.logoffTitle'), t('menu.root.logoffConfirmMessage'));
                 if (confirmLogoff) {
                     await this.whatsappService.logout();
-                    ctx.ui.notify('Logged off and credentials deleted', 'info');
+                    ctx.ui.notify(t('menu.root.loggedOffAndDeleted'), 'info');
                 }
                 break;
-            }
-            case 'Allowed Numbers':
+            case allowedNumbersLabel:
                 await this.manageAllowList(ctx);
                 break;
-            case 'Blocked Numbers':
+            case blockedNumbersLabel:
                 await this.manageBlockList(ctx);
                 break;
-            case 'Recents':
+            case recentsLabel:
                 await this.manageRecents(ctx);
                 break;
         }
@@ -85,23 +93,26 @@ export class MenuHandler {
 
     private async manageAllowList(ctx: ExtensionCommandContext) {
         const list = this.sortContactsAlphabetically(this.sessionManager.getAllowList());
-        const options = [...list.map(contact => this.formatAllowedContactOption(contact)), 'Add Number', 'Back'];
+        const title = t('menu.allowed.title');
+        const addNumberLabel = t('menu.allowed.addNumber');
+        const backLabel = t('menu.root.back');
+        const options = [...list.map(contact => this.formatAllowedContactOption(contact)), addNumberLabel, backLabel];
 
-        const choice = await ctx.ui.select('Allowed Numbers', options);
+        const choice = await ctx.ui.select(title, options);
 
-        if (choice === 'Add Number') {
-            const num = await ctx.ui.input('Enter number (e.g. +5511999999999):');
+        if (choice === addNumberLabel) {
+            const num = await ctx.ui.input(t('menu.allowed.enterNumber'));
             if (num && validatePhoneNumber(num)) {
                 await this.sessionManager.addNumber(num);
-                ctx.ui.notify(`Added ${num}`, 'info');
+                ctx.ui.notify(t('menu.allowed.addedToAllowList', { number: num }), 'info');
             } else {
-                ctx.ui.notify('Invalid number format', 'error');
+                ctx.ui.notify(t('menu.allowed.invalidNumber'), 'error');
             }
             await this.manageAllowList(ctx);
             return;
         }
 
-        if (choice === 'Back' || !choice) {
+        if (choice === backLabel || !choice) {
             await this.handleCommand(ctx);
             return;
         }
@@ -117,62 +128,70 @@ export class MenuHandler {
 
     private async manageAllowedContact(ctx: ExtensionCommandContext, contact: Contact) {
         const displayName = this.formatAllowedContactOption(contact);
-        const options = ['History', 'Send Message', 'Print Number'];
+        const title = t('menu.allowed.contact.title', { displayName });
+        const historyLabel = t('menu.allowed.contact.history');
+        const sendMessageLabel = t('menu.allowed.contact.sendMessage');
+        const printNumberLabel = t('menu.allowed.contact.printNumber');
+        const removeAliasLabel = t('menu.allowed.contact.removeAlias');
+        const addAliasLabel = t('menu.allowed.contact.addAlias');
+        const removeNumberLabel = t('menu.allowed.contact.removeNumber');
+        const backLabel = t('menu.allowed.contact.back');
+        const options = [historyLabel, sendMessageLabel, printNumberLabel];
         if (contact.name) {
-            options.push('Remove Alias');
+            options.push(removeAliasLabel);
         } else {
-            options.push('Add Alias');
+            options.push(addAliasLabel);
         }
-        options.push('Remove Number', 'Back');
+        options.push(removeNumberLabel, backLabel);
 
-        const choice = await ctx.ui.select(`Allowed Number • ${displayName}`, options);
+        const choice = await ctx.ui.select(title, options);
 
-        if (choice === 'Send Message') {
+        if (choice === sendMessageLabel) {
             await this.sendMessageToAllowedNumber(ctx, contact);
             await this.manageAllowedContact(ctx, contact);
             return;
         }
 
-        if (choice === 'History') {
+        if (choice === historyLabel) {
             await this.showConversationHistoryForNumber(ctx, contact.number, displayName);
             await this.manageAllowedContact(ctx, contact);
             return;
         }
 
-        if (choice === 'Print Number') {
+        if (choice === printNumberLabel) {
             this.printAllowedNumber(ctx, contact.number);
             await this.manageAllowedContact(ctx, contact);
             return;
         }
 
-        if (choice === 'Add Alias') {
-            const alias = await ctx.ui.input(`Enter alias for ${contact.number}:`);
+        if (choice === addAliasLabel) {
+            const alias = await ctx.ui.input(t('menu.allowed.enterAlias', { number: contact.number }));
             const trimmedAlias = alias?.trim() || '';
 
             if (!trimmedAlias) {
-                ctx.ui.notify('Please enter an alias.', 'error');
+                ctx.ui.notify(t('menu.allowed.pleaseEnterAlias'), 'error');
                 await this.manageAllowedContact(ctx, contact);
                 return;
             }
 
             await this.sessionManager.setAllowedContactAlias(contact.number, trimmedAlias);
-            ctx.ui.notify(`Alias added for ${contact.number}`, 'info');
+            ctx.ui.notify(t('menu.allowed.aliasAdded', { number: contact.number }), 'info');
             await this.manageAllowedContact(ctx, { ...contact, name: trimmedAlias });
             return;
         }
 
-        if (choice === 'Remove Alias') {
+        if (choice === removeAliasLabel) {
             await this.sessionManager.removeAllowedContactAlias(contact.number);
-            ctx.ui.notify(`Alias removed for ${contact.number}`, 'info');
+            ctx.ui.notify(t('menu.allowed.aliasRemoved', { number: contact.number }), 'info');
             await this.manageAllowedContact(ctx, { ...contact, name: undefined });
             return;
         }
 
-        if (choice === 'Remove Number') {
-            const ok = await ctx.ui.confirm('Remove Number', `Remove ${displayName} from Allowed Numbers?`);
+        if (choice === removeNumberLabel) {
+            const ok = await ctx.ui.confirm(t('menu.allowed.removeConfirmTitle'), t('menu.allowed.removeConfirmMessage', { displayName }));
             if (ok) {
                 await this.sessionManager.removeNumber(contact.number);
-                ctx.ui.notify(`Removed ${displayName}`, 'info');
+                ctx.ui.notify(t('menu.allowed.removed', { displayName }), 'info');
             }
             await this.manageAllowList(ctx);
             return;
@@ -187,7 +206,7 @@ export class MenuHandler {
             .map((entry) => `  • ${entry}`)
             .join('\n');
         console.log([
-            '[WhatsApp-Pi] Allowed numbers',
+            t('menu.allowed.printAllowedNumbersTitle'),
             output
         ].join('\n'));
         ctx.ui.notify(this.printedAllowedNumbers.join('\n'), 'info');
@@ -195,17 +214,19 @@ export class MenuHandler {
 
     private async manageBlockList(ctx: ExtensionCommandContext) {
         const list = [...this.sessionManager.getBlockList()].reverse();
+        const title = t('menu.blocked.title');
+        const backLabel = t('menu.blocked.back');
 
         if (list.length === 0) {
-            ctx.ui.notify('No blocked numbers', 'info');
+            ctx.ui.notify(t('menu.blocked.empty'), 'info');
             await this.handleCommand(ctx);
             return;
         }
 
-        const options = [...list.map(c => c.name ? `${c.name} (${c.number})` : c.number), 'Back'];
-        const choice = await ctx.ui.select('Blocked Numbers (Select to Manage)', options);
+        const options = [...list.map(c => c.name ? `${c.name} (${c.number})` : c.number), backLabel];
+        const choice = await ctx.ui.select(title, options);
 
-        if (choice && choice !== 'Back') {
+        if (choice && choice !== backLabel) {
             await this.manageBlockedNumber(ctx, this.parseContactNumberOption(choice));
         } else {
             await this.handleCommand(ctx);
@@ -213,20 +234,24 @@ export class MenuHandler {
     }
 
     private async manageBlockedNumber(ctx: ExtensionCommandContext, number: string) {
-        const action = await ctx.ui.select(`Manage ${number}`, ['Allow', 'Delete', 'Back']);
+        const title = t('menu.blocked.manageTitle', { number });
+        const allowLabel = t('menu.blocked.allow');
+        const deleteLabel = t('menu.blocked.delete');
+        const backLabel = t('menu.blocked.back');
+        const action = await ctx.ui.select(title, [allowLabel, deleteLabel, backLabel]);
 
-        if (action === 'Allow') {
-            const ok = await ctx.ui.confirm('Allow', `Move ${number} to Allowed Numbers?`);
+        if (action === allowLabel) {
+            const ok = await ctx.ui.confirm(t('menu.blocked.allowConfirmTitle'), t('menu.blocked.allowConfirmMessage', { number }));
             if (ok) {
                 await this.sessionManager.unblockAndAllow(number);
-                ctx.ui.notify(`${number} moved to Allowed List`, 'info');
+                ctx.ui.notify(t('menu.blocked.allowed', { number }), 'info');
             }
             await this.manageBlockList(ctx);
-        } else if (action === 'Delete') {
-            const ok = await ctx.ui.confirm('Delete', `Remove ${number} from Block List?`);
+        } else if (action === deleteLabel) {
+            const ok = await ctx.ui.confirm(t('menu.blocked.deleteConfirmTitle'), t('menu.blocked.deleteConfirmMessage', { number }));
             if (ok) {
                 await this.sessionManager.unblockNumber(number);
-                ctx.ui.notify(`${number} removed from Block List`, 'info');
+                ctx.ui.notify(t('menu.blocked.deleted', { number }), 'info');
             }
             await this.manageBlockList(ctx);
         } else {
@@ -236,20 +261,22 @@ export class MenuHandler {
 
     private async manageRecents(ctx: ExtensionCommandContext) {
         const recentConversations = await this.recentsService.getRecentConversations();
+        const title = t('menu.recents.title');
+        const backLabel = t('menu.root.back');
 
         if (recentConversations.length === 0) {
-            ctx.ui.notify('No recent individual conversations yet.', 'info');
+            ctx.ui.notify(t('menu.recents.empty'), 'info');
             await this.handleCommand(ctx);
             return;
         }
 
         const options = [
             ...recentConversations.map(conversation => this.formatRecentConversationOption(conversation)),
-            'Back'
+            backLabel
         ];
 
-        const choice = await ctx.ui.select('Recents', options);
-        if (!choice || choice === 'Back') {
+        const choice = await ctx.ui.select(title, options);
+        if (!choice || choice === backLabel) {
             await this.handleCommand(ctx);
             return;
         }
@@ -269,36 +296,42 @@ export class MenuHandler {
     private async manageRecentConversation(ctx: ExtensionCommandContext, conversation: RecentConversationSummary) {
         const displayName = this.getConversationDisplayName(conversation);
         const allowedContact = this.sessionManager.getAllowedContact(conversation.senderNumber);
-        const options: string[] = ['History'];
+        const title = t('menu.recents.contact.title', { displayName });
+        const historyLabel = t('menu.recents.contact.history');
+        const allowNumberLabel = t('menu.recents.contact.allowNumber');
+        const sendMessageLabel = t('menu.recents.contact.sendMessage');
+        const removeAliasLabel = t('menu.recents.contact.removeAlias');
+        const backLabel = t('menu.recents.contact.back');
+        const options: string[] = [historyLabel];
 
         if (!allowedContact) {
-            options.push('Allow Number');
+            options.push(allowNumberLabel);
         }
 
-        options.push('Send Message');
+        options.push(sendMessageLabel);
 
         if (allowedContact?.name) {
-            options.push('Remove Alias');
+            options.push(removeAliasLabel);
         }
 
-        options.push('Back');
+        options.push(backLabel);
 
-        const choice = await ctx.ui.select(`Recents • ${displayName}`, options);
+        const choice = await ctx.ui.select(title, options);
 
-        if (choice === 'Allow Number') {
+        if (choice === allowNumberLabel) {
             if (this.sessionManager.isAllowed(conversation.senderNumber)) {
-                ctx.ui.notify(`${conversation.senderNumber} is already in the allow list`, 'info');
+                ctx.ui.notify(t('menu.recents.alreadyAllowed', { number: conversation.senderNumber }), 'info');
             } else {
                 await this.sessionManager.addNumber(conversation.senderNumber, conversation.senderName);
-                ctx.ui.notify(`Added ${conversation.senderNumber} to the allow list`, 'info');
+                ctx.ui.notify(t('menu.recents.addedToAllowList', { number: conversation.senderNumber }), 'info');
             }
             await this.manageRecentConversation(ctx, conversation);
             return;
         }
 
-        if (choice === 'Remove Alias') {
+        if (choice === removeAliasLabel) {
             await this.sessionManager.removeAllowedContactAlias(conversation.senderNumber);
-            ctx.ui.notify(`Alias removed for ${conversation.senderNumber}`, 'info');
+            ctx.ui.notify(t('menu.recents.aliasRemoved', { number: conversation.senderNumber }), 'info');
             await this.manageRecentConversation(ctx, {
                 ...conversation,
                 senderName: undefined
@@ -306,13 +339,13 @@ export class MenuHandler {
             return;
         }
 
-        if (choice === 'Send Message') {
+        if (choice === sendMessageLabel) {
             await this.sendMessageFromRecents(ctx, conversation);
             await this.manageRecentConversation(ctx, conversation);
             return;
         }
 
-        if (choice === 'History') {
+        if (choice === historyLabel) {
             await this.showConversationHistory(ctx, conversation);
             await this.manageRecentConversation(ctx, conversation);
             return;
@@ -350,10 +383,10 @@ export class MenuHandler {
     ) {
         const { displayName, senderNumber, senderName, appendPiSuffix } = options;
         for (let attempt = 0; attempt < 2; attempt++) {
-            const inputText = (await ctx.ui.input(`Send a message to ${displayName}:`))?.trim() || '';
+            const inputText = (await ctx.ui.input(t('menu.allowed.sendPrompt', { displayName })))?.trim() || '';
 
             if (!inputText) {
-                ctx.ui.notify('Please enter a message before sending.', 'error');
+                ctx.ui.notify(t('menu.allowed.messageRequired'), 'error');
                 continue;
             }
 
@@ -368,9 +401,9 @@ export class MenuHandler {
                     direction: 'outgoing',
                     timestamp: Date.now()
                 });
-                ctx.ui.notify(`Sent message to ${displayName}`, 'info');
+                ctx.ui.notify(t('menu.allowed.sendSuccess', { displayName }), 'info');
             } else {
-                ctx.ui.notify(`Failed to send message to ${displayName}: ${result.error ?? 'Unknown error'}`, 'error');
+                ctx.ui.notify(t('menu.allowed.sendFailure', { displayName, error: result.error ?? 'Unknown error' }), 'error');
             }
             return;
         }
@@ -394,17 +427,17 @@ export class MenuHandler {
         const history = await this.recentsService.getConversationHistory(senderNumber);
 
         if (history.length === 0) {
-            ctx.ui.notify('No message history available for this conversation.', 'info');
+            ctx.ui.notify(t('menu.recents.history.empty'), 'info');
             return;
         }
 
         const historyOptions = this.buildHistoryOptions(this.sortHistoryByMostRecent(history));
-        const choice = await ctx.ui.select(`History • ${displayName}`, [
+        const choice = await ctx.ui.select(t('menu.recents.history.title', { displayName }), [
             ...historyOptions.map(option => option.label),
-            'Back'
+            t('menu.root.back')
         ]);
 
-        if (!choice || choice === 'Back') {
+        if (!choice || choice === t('menu.root.back')) {
             return;
         }
 
@@ -414,7 +447,7 @@ export class MenuHandler {
         }
 
         const detailAction = await showMessageDetailView(ctx, {
-            title: `Message • ${displayName}`,
+            title: t('menu.recents.history.messageTitle', { displayName }),
             messageId: selectedMessage.messageId,
             senderNumber: selectedMessage.senderNumber,
             senderName,
@@ -508,8 +541,8 @@ export class MenuHandler {
     }
 
     private formatHistoryOption(timestamp: number, direction: string, text: string): string {
-        const marker = direction === 'outgoing' ? 'Sent' : 'Received';
-        const displayText = this.truncate(text, 60) || '[No text]';
+        const marker = direction === 'outgoing' ? t('menu.recents.history.sent') : t('menu.recents.history.received');
+        const displayText = this.truncate(text, 60) || t('menu.recents.history.noText');
         return `${this.formatDateTimeWithSeconds(timestamp)} • ${marker} • ${displayText}`;
     }
 

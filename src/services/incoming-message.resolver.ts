@@ -1,3 +1,4 @@
+import { t } from '../i18n.js';
 import { extractMessageContent } from 'baileys';
 
 export type IncomingResolution =
@@ -10,24 +11,43 @@ export type IncomingResolution =
     | { kind: 'system'; text: string }
     | { kind: 'unsupported'; text: string };
 
-const protocolTypes: Record<number, string> = {
-    0: 'Message Deleted',
-    3: 'Disappearing Messages Updated',
-    4: 'Disappearing Message Sync Response',
-    5: 'History Sync Notification',
-    6: 'App State Sync Key Share',
-    7: 'App State Sync Key Request',
-    8: 'Message Backfill Request',
-    9: 'Security Notification Sync',
-    10: 'Fatal App State Sync Notification',
-    11: 'Phone Number Shared',
-    14: 'Message Edited',
-    16: 'Peer Data Request',
-    17: 'Peer Data Response',
-    18: 'Welcome Message Request',
-    19: 'Bot Feedback',
-    20: 'Media Notification'
+const protocolTypes: Record<number, keyof typeof protocolLabels> = {
+    0: 'messageDeleted',
+    3: 'disappearingMessagesUpdated',
+    4: 'disappearingMessageSyncResponse',
+    5: 'historySyncNotification',
+    6: 'appStateSyncKeyShare',
+    7: 'appStateSyncKeyRequest',
+    8: 'messageBackfillRequest',
+    9: 'securityNotificationSync',
+    10: 'fatalAppStateSyncNotification',
+    11: 'phoneNumberShared',
+    14: 'messageEdited',
+    16: 'peerDataRequest',
+    17: 'peerDataResponse',
+    18: 'welcomeMessageRequest',
+    19: 'botFeedback',
+    20: 'mediaNotification'
 };
+
+const protocolLabels = {
+    messageDeleted: t('incoming.protocol.messageDeleted'),
+    disappearingMessagesUpdated: t('incoming.protocol.disappearingMessagesUpdated'),
+    disappearingMessageSyncResponse: t('incoming.protocol.disappearingMessageSyncResponse'),
+    historySyncNotification: t('incoming.protocol.historySyncNotification'),
+    appStateSyncKeyShare: t('incoming.protocol.appStateSyncKeyShare'),
+    appStateSyncKeyRequest: t('incoming.protocol.appStateSyncKeyRequest'),
+    messageBackfillRequest: t('incoming.protocol.messageBackfillRequest'),
+    securityNotificationSync: t('incoming.protocol.securityNotificationSync'),
+    fatalAppStateSyncNotification: t('incoming.protocol.fatalAppStateSyncNotification'),
+    phoneNumberShared: t('incoming.protocol.phoneNumberShared'),
+    messageEdited: t('incoming.protocol.messageEdited'),
+    peerDataRequest: t('incoming.protocol.peerDataRequest'),
+    peerDataResponse: t('incoming.protocol.peerDataResponse'),
+    welcomeMessageRequest: t('incoming.protocol.welcomeMessageRequest'),
+    botFeedback: t('incoming.protocol.botFeedback'),
+    mediaNotification: t('incoming.protocol.mediaNotification')
+} as const;
 
 const unwrapMessageContent = (content: any): any => extractMessageContent(content) ?? content;
 
@@ -37,7 +57,8 @@ const getTypeName = (payload: any): string => {
 };
 
 const formatProtocolMessage = (protocolMessage: any): string => {
-    const typeLabel = protocolTypes[Number(protocolMessage?.type)] || 'System Update';
+    const typeLabelKey = protocolTypes[Number(protocolMessage?.type)];
+    const typeLabel = typeLabelKey ? protocolLabels[typeLabelKey] : t('incoming.protocol.systemUpdate');
     const editedText = protocolMessage?.editedMessage?.conversation
         || protocolMessage?.editedMessage?.extendedTextMessage?.text;
 
@@ -77,7 +98,7 @@ export const extractIncomingText = (message: any): IncomingResolution => {
     if (resolved?.imageMessage) {
         return {
             kind: 'image',
-            text: resolved.imageMessage.caption || '[Image]',
+            text: resolved.imageMessage.caption || t('incoming.media.image'),
             imageMessage: resolved.imageMessage
         };
     }
@@ -85,14 +106,14 @@ export const extractIncomingText = (message: any): IncomingResolution => {
     if (resolved?.videoMessage) {
         return {
             kind: 'text',
-            text: resolved.videoMessage.caption || '[Video]'
+            text: resolved.videoMessage.caption || t('incoming.media.video')
         };
     }
 
     if (resolved?.audioMessage) {
         return {
             kind: 'audio',
-            text: '[Audio Message]',
+            text: t('incoming.media.audio'),
             audioMessage: resolved.audioMessage
         };
     }
@@ -100,17 +121,17 @@ export const extractIncomingText = (message: any): IncomingResolution => {
     if (resolved?.documentMessage) {
         return {
             kind: 'document',
-            text: resolved.documentMessage.caption || '[Document]',
+            text: resolved.documentMessage.caption || t('incoming.media.document'),
             documentMessage: resolved.documentMessage
         };
     }
 
     if (resolved?.contactMessage || resolved?.contactsArrayMessage) {
-        return { kind: 'contact', text: '[Contact]' };
+        return { kind: 'contact', text: t('incoming.media.contact') };
     }
 
     if (resolved?.locationMessage) {
-        return { kind: 'location', text: '[Location]' };
+        return { kind: 'location', text: t('incoming.media.location') };
     }
 
     if (resolved?.buttonsResponseMessage?.selectedDisplayText) {
@@ -125,5 +146,5 @@ export const extractIncomingText = (message: any): IncomingResolution => {
         return { kind: 'text', text: resolved.templateButtonReplyMessage.selectedDisplayText };
     }
 
-    return { kind: 'unsupported', text: `[Unsupported Message Type: ${typeName}]` };
+    return { kind: 'unsupported', text: t('incoming.media.unsupported', { typeName }) };
 };

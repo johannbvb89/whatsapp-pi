@@ -3,6 +3,7 @@ import { join } from 'path';
 import { readFile, writeFile, mkdir, rm, rename } from 'fs/promises';
 import { homedir } from 'os';
 import { SessionStatus } from '../models/whatsapp.types.js';
+import { t } from '../i18n.js';
 
 export interface Contact {
     number: string;
@@ -164,7 +165,7 @@ export class SessionManager {
             await rename(tempPath, this.configPath);
         } catch (error) {
             await rm(tempPath, { force: true }).catch(() => {});
-            console.error('Failed to save config:', error);
+            console.error(t('session.manager.failedSaveConfig'), error);
         }
     }
 
@@ -197,7 +198,7 @@ export class SessionManager {
         }
 
         if (typeof cleanNumber !== 'string') {
-            console.warn('[SessionManager] Attempted to add invalid number:', cleanNumber);
+            console.warn(t('session.manager.invalidNumber'), cleanNumber);
             return;
         }
 
@@ -335,7 +336,7 @@ export class SessionManager {
             this.hasAuthState = false;
             await this.saveConfig();
         } catch (error) {
-            console.error('Failed to delete auth state:', error);
+            console.error(t('session.manager.failedDeleteAuthState'), error);
         }
     }
 

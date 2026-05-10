@@ -2,6 +2,7 @@ import type { ReplyDraft, ReplySendResult, SelectedMessageContext } from '../mod
 import { truncateToWidth } from '@mariozechner/pi-tui';
 import type { WhatsAppService } from '../services/whatsapp.service.js';
 import type { RecentsService } from '../services/recents.service.js';
+import { t } from '../i18n.js';
 
 export interface MessageReplyViewProps {
     selectedMessage: SelectedMessageContext;
@@ -22,7 +23,7 @@ interface MessageReplyContext {
 const buildPreview = (text: string): string => {
     const normalized = text.trim().replace(/\s+/g, ' ');
     if (!normalized) {
-        return '[No readable text available]';
+        return t('message.reply.noReadableText');
     }
 
     return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
@@ -34,9 +35,9 @@ const buildReplyWidget = (selectedMessage: SelectedMessageContext): string[] => 
         : selectedMessage.senderNumber;
 
     return [
-        `Replying to: ${sender}`,
-        `Message ID: ${selectedMessage.messageId}`,
-        `Original: ${buildPreview(selectedMessage.text)}`
+        `${t('message.reply.replyingTo')}: ${sender}`,
+        `${t('message.reply.messageId')}: ${selectedMessage.messageId}`,
+        `${t('message.reply.original')}: ${buildPreview(selectedMessage.text)}`
     ];
 };
 
@@ -45,7 +46,7 @@ const buildReplyTitle = (selectedMessage: SelectedMessageContext): string => {
         ? `${selectedMessage.senderName} (${selectedMessage.senderNumber})`
         : selectedMessage.senderNumber;
 
-    return truncateToWidth(`Reply to ${sender}`, 120);
+    return truncateToWidth(`${t('message.reply.title')} ${sender}`, 120);
 };
 
 export async function showMessageReplyView(
@@ -65,7 +66,7 @@ export async function showMessageReplyView(
 
             const text = replyText.trim();
             if (!text) {
-                ctx.ui.notify('Please enter a message before sending.', 'error');
+                ctx.ui.notify(t('message.reply.emptyMessage'), 'error');
                 continue;
             }
 
@@ -89,10 +90,10 @@ export async function showMessageReplyView(
                     direction: 'outgoing',
                     timestamp: Date.now()
                 });
-                ctx.ui.notify(`Sent reply to ${buildPreview(props.selectedMessage.text)}`, 'info');
+                ctx.ui.notify(t('message.reply.sent', { preview: buildPreview(props.selectedMessage.text) }), 'info');
             } else {
                 ctx.ui.notify(
-                    `Failed to send reply: ${result.error ?? 'Unknown error'}`,
+                    t('message.reply.failed', { error: result.error ?? t('message.reply.unknownError') }),
                     'error'
                 );
             }

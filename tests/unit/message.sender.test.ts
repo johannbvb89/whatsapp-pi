@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetI18n } from '../../src/i18n.js';
 import { MessageSender } from '../../src/services/message.sender.js';
 
 describe('MessageSender', () => {
@@ -10,6 +11,7 @@ describe('MessageSender', () => {
     };
 
     beforeEach(() => {
+        resetI18n();
         vi.clearAllMocks();
         vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.spyOn(console, 'log').mockImplementation(() => {});

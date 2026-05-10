@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MenuHandler } from '../../src/ui/menu.handler.js';
+import { resetI18n } from '../../src/i18n.js';
 import { showMessageDetailView } from '../../src/ui/message-detail.view.js';
 import { showMessageReplyView } from '../../src/ui/message-reply.view.js';
 
@@ -80,6 +81,7 @@ const createServices = () => {
 
 describe('MenuHandler', () => {
     beforeEach(() => {
+        resetI18n();
         vi.clearAllMocks();
         vi.spyOn(Date, 'now').mockReturnValue(1234567890);
     });
@@ -160,7 +162,7 @@ describe('MenuHandler', () => {
             'Back'
         ]);
         expect(sessionManager.addNumber).toHaveBeenCalledWith('+5511999998888');
-        expect(ctx.ui.notify).toHaveBeenCalledWith('Added +5511999998888', 'info');
+        expect(ctx.ui.notify).toHaveBeenCalledWith('Added +5511999998888 to the allow list', 'info');
     });
 
     it('sends a message to an allowed contact with the Pi suffix and records it', async () => {
