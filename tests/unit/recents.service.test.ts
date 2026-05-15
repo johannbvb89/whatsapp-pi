@@ -35,7 +35,7 @@ describe('RecentsService', () => {
         await service.ensureInitialized();
 
         expect(fsMocks.mkdir).toHaveBeenCalledWith(
-            'C:\\Users\\test\\.pi\\whatsapp-pi\\recents',
+            'C:\\Users\\test/.pi/whatsapp-pi/recents',
             { recursive: true }
         );
         await expect(service.getRecentConversations()).resolves.toEqual([]);
@@ -49,7 +49,7 @@ describe('RecentsService', () => {
             messageId: 'MSG1',
             senderNumber: '5511999998888@s.whatsapp.net',
             senderName: 'Ana',
-            text: '  hello\nthere  ',
+            text: '  hello 👋\nthere 😊  ',
             direction: 'incoming',
             timestamp: 1000
         });
@@ -103,6 +103,22 @@ describe('RecentsService', () => {
             expect.objectContaining({ messageId: 'MSG1', text: 'edited', timestamp: 1000000 }),
             expect.objectContaining({ messageId: 'MSG2', text: 'second', timestamp: 2000000 })
         ]);
+    });
+
+    it('ignores messages that become empty after stripping special characters', async () => {
+        const service = new RecentsService(sessionManager as any);
+        await service.ensureInitialized();
+
+        await service.recordMessage({
+            messageId: 'MSG1',
+            senderNumber: '+5511999998888',
+            text: '😀👍',
+            direction: 'incoming',
+            timestamp: 1000
+        });
+
+        expect(fsMocks.writeFile).not.toHaveBeenCalled();
+        await expect(service.getRecentConversations()).resolves.toEqual([]);
     });
 
     it('orders conversations by their latest message time', async () => {

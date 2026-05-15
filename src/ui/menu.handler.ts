@@ -346,6 +346,9 @@ export class MenuHandler {
         const recentConversations = await this.recentsService.getRecentConversations();
         const title = t('menu.recents.title');
         const backLabel = t('menu.root.back');
+        const nextLabel = 'Next';
+        const previousLabel = 'Previous';
+        const pageSize = 10;
 
         if (recentConversations.length === 0) {
             ctx.ui.notify(t('menu.recents.empty'), 'info');
@@ -353,27 +356,43 @@ export class MenuHandler {
             return;
         }
 
-        const options = [
-            ...recentConversations.map(conversation => this.formatRecentConversationOption(conversation)),
-            backLabel
-        ];
+        for (let page = 0; page * pageSize < recentConversations.length;) {
+            const start = page * pageSize;
+            const pageConversations = recentConversations.slice(start, start + pageSize);
+            const options = [
+                ...pageConversations.map(conversation => this.formatRecentConversationOption(conversation)),
+                ...(page > 0 ? [previousLabel] : []),
+                ...(start + pageSize < recentConversations.length ? [nextLabel] : []),
+                backLabel
+            ];
 
-        const choice = await ctx.ui.select(title, options);
-        if (!choice || choice === backLabel) {
-            await this.handleCommand(ctx);
+            const choice = await ctx.ui.select(title, options);
+            if (!choice || choice === backLabel) {
+                await this.handleCommand(ctx);
+                return;
+            }
+
+            if (choice === nextLabel) {
+                page += 1;
+                continue;
+            }
+
+            if (choice === previousLabel) {
+                page = Math.max(0, page - 1);
+                continue;
+            }
+
+            const selectedConversation = pageConversations.find(conversation =>
+                this.formatRecentConversationOption(conversation) === choice
+            );
+
+            if (!selectedConversation) {
+                return;
+            }
+
+            await this.manageRecentConversation(ctx, selectedConversation);
             return;
         }
-
-        const selectedConversation = recentConversations.find(conversation =>
-            this.formatRecentConversationOption(conversation) === choice
-        );
-
-        if (!selectedConversation) {
-            await this.manageRecents(ctx);
-            return;
-        }
-
-        await this.manageRecentConversation(ctx, selectedConversation);
     }
 
     private async manageRecentConversation(ctx: ExtensionCommandContext, conversation: RecentConversationSummary) {
@@ -559,44 +578,66 @@ export class MenuHandler {
             return;
         }
 
-        const historyOptions = this.buildHistoryOptions(this.sortHistoryByMostRecent(history));
-        const choice = await ctx.ui.select(t('menu.recents.history.title', { displayName }), [
-            ...historyOptions.map(option => option.label),
-            t('menu.root.back')
-        ]);
+        const sortedHistory = this.sortHistoryByMostRecent(history);
+        const pageSize = 10;
+        const backLabel = t('menu.root.back');
+        const nextLabel = 'Next';
+        const previousLabel = 'Previous';
 
-        if (!choice || choice === t('menu.root.back')) {
-            return;
-        }
+        for (let page = 0; page * pageSize < sortedHistory.length;) {
+            const start = page * pageSize;
+            const pageHistory = sortedHistory.slice(start, start + pageSize);
+            const historyOptions = this.buildHistoryOptions(pageHistory);
+            const choice = await ctx.ui.select(t('menu.recents.history.title', { displayName }), [
+                ...historyOptions.map(option => option.label),
+                ...(page > 0 ? [previousLabel] : []),
+                ...(start + pageSize < sortedHistory.length ? [nextLabel] : []),
+                backLabel
+            ]);
 
-        const selectedMessage = this.resolveHistorySelection(choice, historyOptions);
-        if (!selectedMessage) {
-            return;
-        }
+            if (!choice || choice === backLabel) {
+                return;
+            }
 
-        const detailAction = await showMessageDetailView(ctx, {
-            title: t('menu.recents.history.messageTitle', { displayName }),
-            messageId: selectedMessage.messageId,
-            senderNumber: selectedMessage.senderNumber,
-            senderName,
-            text: selectedMessage.text,
-            direction: selectedMessage.direction,
-            timestamp: selectedMessage.timestamp
-        });
+            if (choice === nextLabel) {
+                page += 1;
+                continue;
+            }
 
-        if (detailAction === 'reply') {
-            await showMessageReplyView(ctx, {
-                selectedMessage: {
-                    messageId: selectedMessage.messageId,
-                    senderNumber: selectedMessage.senderNumber,
-                    senderName,
-                    text: selectedMessage.text,
-                    direction: selectedMessage.direction,
-                    timestamp: selectedMessage.timestamp
-                },
-                whatsappService: this.whatsappService,
-                recentsService: this.recentsService
+            if (choice === previousLabel) {
+                page = Math.max(0, page - 1);
+                continue;
+            }
+
+            const selectedMessage = this.resolveHistorySelection(choice, historyOptions);
+            if (!selectedMessage) {
+                return;
+            }
+
+            const detailAction = await showMessageDetailView(ctx, {
+                title: t('menu.recents.history.messageTitle', { displayName }),
+                messageId: selectedMessage.messageId,
+                senderNumber: selectedMessage.senderNumber,
+                senderName,
+                text: selectedMessage.text,
+                direction: selectedMessage.direction,
+                timestamp: selectedMessage.timestamp
             });
+
+            if (detailAction === 'reply') {
+                await showMessageReplyView(ctx, {
+                    selectedMessage: {
+                        messageId: selectedMessage.messageId,
+                        senderNumber: selectedMessage.senderNumber,
+                        senderName,
+                        text: selectedMessage.text,
+                        direction: selectedMessage.direction,
+                        timestamp: selectedMessage.timestamp
+                    },
+                    whatsappService: this.whatsappService,
+                    recentsService: this.recentsService
+                });
+            }
         }
     }
 

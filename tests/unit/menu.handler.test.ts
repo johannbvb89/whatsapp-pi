@@ -426,6 +426,43 @@ describe('MenuHandler', () => {
         }));
     });
 
+    it('paginates recents list by 10 conversations', async () => {
+        const { whatsappService, sessionManager, recentsService } = createServices();
+        recentsService.getRecentConversations.mockResolvedValue(Array.from({ length: 11 }, (_value, index) => ({
+            senderNumber: `+55119999988${String(index).padStart(2, '0')}`,
+            senderName: `Contact ${index + 1}`,
+            lastMessagePreview: `preview ${index + 1}`,
+            lastMessageTime: 1234567890 + index,
+            lastMessageDirection: index % 2 === 0 ? 'incoming' : 'outgoing',
+            messageCount: 1,
+            isAllowed: false
+        })));
+        const ctx = createContext({
+            selects: [
+                'Recents',
+                (_title, options) => {
+                    expect(options).toHaveLength(12);
+                    expect(options.at(-2)).toBe('Next');
+                    expect(options.at(-1)).toBe('Back');
+                    return 'Next';
+                },
+                (_title, options) => {
+                    expect(options).toHaveLength(3);
+                    expect(options[0]).toContain('Contact 1');
+                    expect(options).toContain('Previous');
+                    expect(options).toContain('Back');
+                    return 'Back';
+                },
+                'Back'
+            ]
+        });
+        const handler = new MenuHandler(whatsappService as any, sessionManager as any, recentsService as any);
+
+        await handler.handleCommand(ctx as any);
+
+        expect(recentsService.getRecentConversations).toHaveBeenCalledOnce();
+    });
+
     it('shows History first in the recents action menu', async () => {
         const { whatsappService, sessionManager, recentsService } = createServices();
         recentsService.getRecentConversations.mockResolvedValue([{
@@ -458,6 +495,52 @@ describe('MenuHandler', () => {
         ]);
     });
 
+
+    it('paginates recent conversation history by 10 messages', async () => {
+        const { whatsappService, sessionManager, recentsService } = createServices();
+        recentsService.getRecentConversations.mockResolvedValue([{
+            senderNumber: '+5511999998888',
+            senderName: 'Ana',
+            lastMessagePreview: 'hello',
+            lastMessageTime: 1234567890,
+            lastMessageDirection: 'incoming',
+            messageCount: 11,
+            isAllowed: false
+        }]);
+        recentsService.getConversationHistory.mockResolvedValue(Array.from({ length: 11 }, (_value, index) => ({
+            messageId: `MSG${index + 1}`,
+            senderNumber: '+5511999998888',
+            text: `message ${index + 1}`,
+            direction: index % 2 === 0 ? 'incoming' : 'outgoing',
+            timestamp: new Date(2026, 3, index + 1, 8, 30, 0).getTime()
+        })));
+        const ctx = createContext({
+            selects: [
+                'Recents',
+                (_title, options) => options[0],
+                'History',
+                (_title, options) => {
+                    expect(options).toHaveLength(12);
+                    expect(options.at(-2)).toBe('Next');
+                    expect(options.at(-1)).toBe('Back');
+                    return 'Next';
+                },
+                (_title, options) => {
+                    expect(options).toHaveLength(3);
+                    expect(options).toContain('Previous');
+                    expect(options).toContain('Back');
+                    return 'Back';
+                },
+                'Back',
+                'Back'
+            ]
+        });
+        const handler = new MenuHandler(whatsappService as any, sessionManager as any, recentsService as any);
+
+        await handler.handleCommand(ctx as any);
+
+        expect(recentsService.getConversationHistory).toHaveBeenCalledWith('+5511999998888');
+    });
 
     it('shows recent conversation history options', async () => {
         const { whatsappService, sessionManager, recentsService } = createServices();

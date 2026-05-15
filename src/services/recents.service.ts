@@ -125,8 +125,15 @@ export class RecentsService {
         });
     }
 
+    private stripSpecialCharacters(text: string): string {
+        return text
+            .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200D\uFE0F]/gu, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     private buildPreview(text: string): string {
-        const normalized = text.trim().replace(/\s+/g, ' ');
+        const normalized = this.stripSpecialCharacters(text);
         if (normalized.length <= 80) return normalized;
         return `${normalized.slice(0, 77)}...`;
     }
@@ -158,7 +165,7 @@ export class RecentsService {
         if (!senderNumber) return;
 
         const normalizedTimestamp = this.normalizeTimestamp(input.timestamp);
-        const normalizedText = input.text.trim().replace(/\s+/g, ' ');
+        const normalizedText = this.stripSpecialCharacters(input.text);
         if (!normalizedText) return;
 
         const existing = this.store.messagesBySender[senderNumber] ?? [];
@@ -181,7 +188,7 @@ export class RecentsService {
         const summary: RecentConversationSummary = {
             senderNumber,
             senderName: input.senderName ?? existingConversation?.senderName,
-            lastMessagePreview: this.buildPreview(input.text),
+            lastMessagePreview: this.buildPreview(normalizedText),
             lastMessageTime: normalizedTimestamp,
             lastMessageDirection: input.direction,
             messageCount: this.store.messagesBySender[senderNumber].length,
