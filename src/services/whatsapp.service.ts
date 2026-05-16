@@ -107,6 +107,7 @@ export class WhatsAppService {
     private saveCreds?: () => Promise<void>;
     private restoreBaileysConsoleFilter?: () => void;
     private reconnectTimeout?: ReturnType<typeof setTimeout>;
+    private intentionalStop = false;
     private onQRCode?: (qr: string) => void;
     private onMessage?: (m: MessagesUpsertEvent) => void;
     private onStatusUpdate?: (status: string) => void;
@@ -254,6 +255,26 @@ export class WhatsAppService {
         return Math.min(delay, WhatsAppService.MAX_RECONNECT_DELAY_MS);
     }
 
+    private scheduleReconnect(options: WhatsAppStartOptions) {
+        if (this.intentionalStop) return;
+        this.isReconnecting = true;
+        this.reconnectAttempts++;
+        const delay = this.getReconnectDelayMs();
+        this.onStatusUpdate?.(t('service.whatsapp.reconnecting'));
+        this.clearReconnectTimeout();
+        this.reconnectTimeout = setTimeout(async () => {
+            this.isReconnecting = false;
+            if (this.intentionalStop) return;
+            try {
+                await this.start(options);
+            } catch {
+                if (!this.intentionalStop) {
+                    this.scheduleReconnect(options);
+                }
+            }
+        }, delay);
+    }
+
     private cleanupSocket() {
         this.clearReconnectTimeout();
 
@@ -322,6 +343,7 @@ export class WhatsAppService {
     }
 
     async start(options: WhatsAppStartOptions = {}) {
+        this.intentionalStop = false;
         if (this.isReconnecting) return;
         this.onStatusUpdate?.(t('service.whatsapp.connecting'));
 
@@ -424,6 +446,10 @@ export class WhatsAppService {
         const isAuthRejected = this.isAuthRejected(statusCode, errorMessage);
         const shouldTreatAsLoggedOut = isBadMac || isAuthRejected;
 
+        if (this.intentionalStop) {
+            return;
+        }
+
         if (this.verboseMode) {
             console.error(t('service.whatsapp.connectionClosed', { statusCode: statusCode ?? 'unknown', shouldReconnect: String(shouldReconnect) }));
         }
@@ -464,17 +490,9 @@ export class WhatsAppService {
         }
 
         if (shouldReconnect && !this.isReconnecting) {
-            this.isReconnecting = true;
-            this.reconnectAttempts++;
-            const reconnectDelayMs = this.getReconnectDelayMs();
-            this.onStatusUpdate?.(t('service.whatsapp.reconnecting'));
-            this.clearReconnectTimeout();
             await this.saveCreds?.();
             this.cleanupSocket();
-            this.reconnectTimeout = setTimeout(() => {
-                this.isReconnecting = false;
-                void this.start(options);
-            }, reconnectDelayMs);
+            this.scheduleReconnect(options);
         } else if (!shouldReconnect) {
             this.reconnectAttempts = 0;
             this.sessionManager.setStatus('logged-out');
@@ -706,11 +724,13 @@ export class WhatsAppService {
     }
 
     async logout() {
+        this.intentionalStop = true;
         await this.socket?.logout();
         await this.sessionManager.deleteAuthState();
     }
 
     async stop() {
+        this.intentionalStop = true;
         try {
             await this.saveCreds?.();
         } catch (error) {
