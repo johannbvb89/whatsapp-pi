@@ -45,3 +45,6 @@ PLAN-*.md
 .pi-data/
 package-lock.json
 .playwright-mcp
+
+# Local archive (internal docs, not for repo)
+archive/
