@@ -1,60 +1,119 @@
-﻿# whatsapp-pi Development Guidelines
+# whatsapp-pi Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-05-16
+> **STATUS: All 12 critical bugs RESOLVED** ✅
+> **Tests:** 155 passing (was 138)
+> **SDK:** `@earendil-works/pi-coding-agent@0.75.3`
+> **Audit:** 2026-05-19 — see `AUDIT-COMPREHENSIVE.md`
+
+## 🔴 BEFORE ANY CODE CHANGE
+
+Run `.pi/skills/whatsapp-pi-guard.md` — the guard skill documents resolved bugs and MUST NOT regress.
+
+After ANY change: `npm test && npx tsc --noEmit`
+
+Pre-review: complete `REVIEW-CHECKLIST.md`.
+
+## Pi SDK Baseline
+
+```typescript
+// CORRECT — Pi SDK v0.75.3 (current)
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+// WRONG — Deprecated, do NOT use
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+```
+
+**SDK reference:** `C:\Users\johan\AppData\Roaming\npm\node_modules\@earendil-works\pi-coding-agent\dist\core\extensions\types.d.ts`
 
 ## Active Technologies
-- [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (002-manual-whatsapp-connection)
-- [if applicable, e.g., PostgreSQL, CoreData, files or N/A] (002-manual-whatsapp-connection)
-- Local file-based multi-file auth state (baileys) (002-manual-whatsapp-connection)
-- N/A (memory-based queuing) (003-whatsapp-messaging-refactor)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `pi-agent-sdk` (004-blocked-numbers-management)
-- `config.json` (Local persistent storage in `.pi-data/`) (004-blocked-numbers-management)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `pi-agent-sdk`, `pino` (005-verbose-mode-support)
-- Memory-based configuration (005-verbose-mode-support)
-- TypeScript 5.x / Node.js 20+ + `pi-agent-sdk` (006-auto-connect-flag)
-- Memory-based flag detection (`--whatsapp-pi-online`, `--verbose`); depends on existing `.pi-data/` auth state. (006-auto-connect-flag)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys` (007-image-recognition)
-- Forwarding images as base64 to Pi (007-image-recognition)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `pi-agent-sdk` (Extension API) (008-document-message-support)
-- Local filesystem persistent storage in `.pi-data/whatsapp/documents/` (008-document-message-support)
-- N/A (String constants) (009-localize-system-messages)
-- TypeScript 5.x on Node.js 20+ + `@whiskeysockets/baileys`, `pino`, `qrcode-terminal`, existing Pi extension APIs (011-whatsapp-recents)
-- Local file-based persistence under the existing user data directory (`~/.pi/whatsapp-pi/`), with a dedicated recents store for conversation summaries and message history (011-whatsapp-recents)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`, `pino`, `qrcode-terminal` (016-message-detail-view)
-- Existing local recents store at `~/.pi/whatsapp-pi/recents/recents.json`; no new persistent storage (016-message-detail-view)
-- TypeScript 5.x on Node.js 20+ + `@whiskeysockets/baileys`, `@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`, `pino`, `qrcode-terminal` (019-seria-possivel-fazer)
-- Local file-based recents store under `~/.pi/whatsapp-pi/recents/recents.json` (019-seria-possivel-fazer)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `vitest`, `typescript`, Node built-ins (`fs`, `fs/promises`, `child_process`, `os`, `path`) (021-increase-unit-test)
-- Existing local media directory under `~/.pi/whatsapp-medias`; tests should mock file access and not depend on real files (021-increase-unit-test)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `@llamaindex/liteparse`, `pino`, `qrcode-terminal`, `@mariozechner/pi-coding-agent` (027-pdf-document-parsing)
-- Local filesystem under `.pi-data/whatsapp/documents/` (027-pdf-document-parsing)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `pino`, `qrcode-terminal`, `pi-agent-sdk` (028-group-reaction-mode)
-- Local file config in `~/.pi/whatsapp-pi/config.json` (028-group-reaction-mode)
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `pi-agent-sdk`, `pino`, `qrcode-terminal` (033-remove-reaction-mode)
-- Local file-based app state under `~/.pi/whatsapp-pi/` (033-remove-reaction-mode)
-
-- TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `qrcode-terminal`, `pi-agent-sdk` (assumed name for Pi extension API) (001-whatsapp-tui-integration)
+- TypeScript 5.x / Node.js 20+
+- `@earendil-works/pi-coding-agent@^0.75.3` (Pi Extension API)
+- `@whiskeysockets/baileys@^6.7.21` (WhatsApp Web)
+- `pino@^10.3.1` (logging)
+- `qrcode-terminal@^0.12.0` (QR display)
+- `@sinclair/typebox@^0.34.49` (tool parameter validation)
+- `@llamaindex/liteparse@^1.5.3` (PDF parsing)
+- `vitest@^1.2.0` (testing)
+- Local file-based persistence in `~/.pi/whatsapp-pi/` (config.json, auth/, recents/)
 
 ## Project Structure
 
-```text
+```
+whatsapp-pi.ts                  # Entry point, flags, tools, commands, lifecycle
 src/
-tests/
+  models/whatsapp.types.ts      # Type definitions
+  services/
+    session.manager.ts          # 🔴 Config persistence, auth state, allow-lists
+    whatsapp.service.ts         # 🔴 Socket lifecycle, reconnect, readiness
+    message.sender.ts           # Message send with retry logic
+    recents.service.ts          # Conversation history
+    audio.service.ts            # Audio transcription
+    incoming-media.service.ts   # Image/document/audio processing
+    incoming-message.resolver.ts # Message text extraction
+    baileys-console-filter.ts   # Baileys log suppression
+    whatsapp-pi.logger.ts       # File-based logging
+  ui/
+    menu.handler.ts             # /whatsapp TUI menu
+    message-detail.view.ts      # Message detail view
+    message-reply.view.ts       # Reply composer
+  i18n.ts                       # Locale strings
+tests/unit/                     # Unit tests
+.pi/skills/                     # Auto-discovered skills
+  whatsapp-pi-guard.md          # 🔴 Guard skill (always active)
+  whatsapp-status.md            # Status debugging skill
 ```
 
 ## Commands
 
-npm test; npm run lint
+```bash
+npm test              # Run all tests (must pass before commit)
+npm run lint          # ESLint check
+npm run typecheck     # TypeScript type checking
+npx tsc --noEmit      # Full type check
+```
 
 ## Code Style
 
 TypeScript 5.x / Node.js 20+: Follow standard conventions
 
-## Recent Changes
-- 033-remove-reaction-mode: Added TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `pi-agent-sdk`, `pino`, `qrcode-terminal`
-- 028-group-reaction-mode: Added TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `pino`, `qrcode-terminal`, `pi-agent-sdk`
-- 027-pdf-document-parsing: Added TypeScript 5.x / Node.js 20+ + `@whiskeysockets/baileys`, `@llamaindex/liteparse`, `pino`, `qrcode-terminal`, `@mariozechner/pi-coding-agent`
+## Critical Files (changes here require guard review)
 
+| File | Guard Reference |
+|------|----------------|
+| `src/services/session.manager.ts` | Bugs P0.1-P0.5 — config persistence |
+| `src/services/whatsapp.service.ts` | Bugs P1.1-P1.2 — readiness/status |
+| `whatsapp-pi.ts` | Bugs P2.3 — session lifecycle |
+| `src/i18n.ts` | Bug P2.1 — dead code |
+| `README.md` | Bugs P3.1-P3.2 — stale docs |
+
+## Known Bug Landscape (2026-05-19 Audit)
+
+See `AUDIT-COMPREHENSIVE.md` for full details. Every change must verify against these 12 bugs:
+
+| Severity | Count | Documentation |
+|----------|-------|---------------|
+| 🔴 P0 (data loss) | 5 | `PLAN-config-overwrite-investigation.md` |
+| 🟡 P1 (status/UX) | 2 | `AUDIT-COMPREHENSIVE.md` §Category 2 |
+| 🟡 P2 (SDK alignment) | 3 | `STRATEGY-v2-rebase.md` |
+| 🟢 P3 (docs/hygiene) | 2 | `AUDIT-COMPREHENSIVE.md` §Category 3 |
+
+## Test Requirements
+
+Any change to `session.manager.ts` MUST include tests for:
+- Persistence cycle (save → reload → verify)
+- Double-init guard (second `ensureInitialized()` is no-op)
+- Debounce coalescing (rapid mutations produce correct final state)
+- Error paths (write failures logged, not swallowed)
+
+See `TEST-GAP-ANALYSIS.md` for the full gap report.
+
+## Related Documents
+
+- `STRATEGY-v2-rebase.md` — SDK rebase strategy
+- `AUDIT-COMPREHENSIVE.md` — Full audit report
+- `TEST-GAP-ANALYSIS.md` — Test coverage gaps
+- `REVIEW-CHECKLIST.md` — Pre-review verification checklist
+- `.pi/skills/whatsapp-pi-guard.md` — Auto-loaded guard skill
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

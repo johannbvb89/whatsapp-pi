@@ -179,6 +179,7 @@ describe('whatsapp-pi extension', () => {
         expect(pi.commands.has('whatsapp')).toBe(true);
         expect(pi.tools.has('send_wa_message')).toBe(true);
         expect(pi.handlers.has('session_start')).toBe(true);
+        expect(pi.handlers.has('session_before_switch')).toBe(true);
         expect(pi.handlers.has('agent_start')).toBe(true);
         expect(pi.handlers.has('message_end')).toBe(true);
         expect(pi.handlers.has('session_shutdown')).toBe(true);

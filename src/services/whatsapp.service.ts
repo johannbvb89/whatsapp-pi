@@ -6,7 +6,7 @@ import {
 } from 'baileys';
 import P from 'pino';
 import { SessionManager } from './session.manager.js';
-import { IncomingMessage, SessionStatus } from '../models/whatsapp.types.js';
+import { IncomingMessage, SessionStatus, ReadinessStatus } from '../models/whatsapp.types.js';
 import { MessageSender } from './message.sender.js';
 import { installBaileysConsoleFilter } from './baileys-console-filter.js';
 import { t } from '../i18n.js';
@@ -154,6 +154,32 @@ export class WhatsAppService {
         }
 
         return status;
+    }
+
+    /**
+     * Readiness = socket connection + authorization to route messages.
+     * Connected without contacts is a silent state — messages arrive but no one replies.
+     * This method tells the truth about whether the system is actually operational.
+     */
+    public getReadinessStatus(): ReadinessStatus {
+        const effectiveStatus = this.getEffectiveStatus();
+        if (effectiveStatus !== 'connected') {
+            return 'not-connected';
+        }
+
+        const hasContacts = this.sessionManager.getAllowList().length > 0;
+        const hasGroups = this.sessionManager.getAllowedGroups().length > 0;
+        const hasBoundGroup = !!this.boundGroupJid;
+
+        if (hasContacts || hasBoundGroup) {
+            return 'ready';
+        }
+
+        if (hasGroups) {
+            return 'groups-only';
+        }
+
+        return 'no-contacts';
     }
 
     public getUptimeMs(): number {
@@ -434,7 +460,17 @@ export class WhatsAppService {
             reconnectAttempts: this.reconnectAttempts,
             uptimeMs: 0
         });
-        this.onStatusUpdate?.(t('service.whatsapp.connected'));
+        // Push accurate status — readiness-aware (connected ≠ ready if no contacts)
+        const readiness = this.getReadinessStatus();
+        if (readiness === 'ready') {
+            this.onStatusUpdate?.(t('service.whatsapp.connected'));
+        } else if (readiness === 'groups-only') {
+            this.onStatusUpdate?.(t('service.whatsapp.connectedGroupsOnly'));
+        } else if (readiness === 'no-contacts') {
+            this.onStatusUpdate?.(t('service.whatsapp.connectedNoContacts'));
+        } else {
+            this.onStatusUpdate?.(t('service.whatsapp.connected'));
+        }
         this.startHealthCheck();
 
         if (this.qrWasShown) {

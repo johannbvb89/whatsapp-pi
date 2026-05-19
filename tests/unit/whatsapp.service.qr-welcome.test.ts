@@ -62,6 +62,8 @@ const createSessionManager = () => ({
     deleteAuthState: vi.fn().mockResolvedValue(undefined),
     isAllowed: vi.fn().mockReturnValue(true),
     isConversationAllowed: vi.fn().mockReturnValue(true),
+    getAllowList: vi.fn().mockReturnValue([{ number: '+5511999998888' }]),
+    getAllowedGroups: vi.fn().mockReturnValue([]),
     getOperatorJid: vi.fn().mockReturnValue(''),
     setOperatorJid: vi.fn().mockResolvedValue(undefined)
 });

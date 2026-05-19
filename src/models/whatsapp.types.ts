@@ -7,6 +7,14 @@ export type SessionStatus =
     | 'pairing'         // QR code displayed for pairing
     | 'error';          // Connection error (check lastError for details)
 
+/** Readiness: is the system actually ready to receive and reply to messages? */
+export type ReadinessStatus =
+    | 'ready'           // Socket open + at least one contact OR bound group authorized
+    | 'groups-only'     // Socket open + groups authorized but 0 contacts and no bound group
+    | 'no-contacts'     // Socket open but allowList empty and no groups
+    | 'not-connected'   // Socket not open
+    | 'no-credentials'; // No WhatsApp auth stored
+
 /**
  * Full connection state persisted to config and available via /whatsapp-status.
  * All fields are optional to maintain backward compatibility.

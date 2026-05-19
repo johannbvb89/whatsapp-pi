@@ -21,6 +21,11 @@ Thumbs.db
 *.swp
 
 # Test phone numbers — never commit personal numbers here
++491626101907
+
+# Taskplane local config (not project source)
+.pi/taskplane.json
+.pi/agents/
 
 # Pi Extension Data
 .pi/extensions/whatsapp/auth/

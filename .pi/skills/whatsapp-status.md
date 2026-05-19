@@ -7,8 +7,24 @@
 | WhatsApp not connecting | `isRegistered()` returns false? | Check `~/.pi/whatsapp-pi/auth/creds.json` exists |
 | Status shows connected but no messages | `getEffectiveStatus()` matches socket? | Socket may be null — effective status returns `disconnected` |
 | Auto-connect not working | `--whatsapp-pi-online` flag set? | Restart Pi with flag |
-| Status flickers | Config write race? | Debounce already applied (200ms) — check for external config writers |
-| isRegistered() unreliable | Fixed in a8c3153 | Now checks `creds.json` directly — no config load race |
+| Status flickers | Config write race? | Check `config-audit.log` for write conflicts |
+| Contacts disappear on restart | Double init or debounce race? | Check `config-audit.log`, verify `_initialized` guard |
+| Footer shows "Connected" but no contacts | Placeholder group in allowed groups? | Check `getReadinessStatus()` — 'ready' with fake group |
+
+## Known Bugs (2026-05-19 Audit — ACTIVE)
+
+These bugs have 0 test coverage and are confirmed real:
+
+| Bug | Location | Symptom |
+|-----|----------|---------|
+| Double `ensureInitialized()` resets state | `session.manager.ts:60-76` | Contacts added then lost on lifecycle event |
+| `setConnectionState()` fire-and-forget | `session.manager.ts:516` | Status writes fail silently |
+| Debounce loses writes on crash | `session.manager.ts:191-199` | Contact lost if Pi killed <200ms after add |
+| Windows rename leaves zombie .tmp | `session.manager.ts:232-239` | Zero-byte .tmp file in config dir |
+| Placeholder group counts as "Ready" | `whatsapp.service.ts:155-170` | Footer says Connected ✅ with 0 contacts |
+| i18n `pi.events` dead code | `i18n.ts:294-323` | Locale switching never works |
+
+See `AUDIT-COMPREHENSIVE.md` for full details. See `.pi/skills/whatsapp-pi-guard.md` for the guard skill.
 
 ## Architecture
 
@@ -16,18 +32,20 @@
 whatsapp-pi.ts (entry point)
 ├── SessionManager (auth state, config, allow-lists)
 │   ├── ~/.pi/whatsapp-pi/config.json        (persistent config)
+│   ├── ~/.pi/whatsapp-pi/config-audit.log   (write trace log)
 │   ├── ~/.pi/whatsapp-pi/auth/creds.json    (Baileys credentials)
 │   ├── isRegistered()                       → direct file check (NOT config-based)
-│   ├── saveConfig()                         → debounced (200ms)
+│   ├── saveConfig()                         → debounced (200ms) — only for non-critical
 │   ├── flushConfig()                        → immediate write for critical paths
 │   ├── flushPendingSave()                   → drain buffer on shutdown
-│   └── _initPromise                         → concurrency guard (prevents double-init)
+│   └── _initPromise + _initialized          → concurrency guard (prevents double-init)
 ├── WhatsAppService (socket lifecycle, reconnect, health check)
 │   ├── socket (Baileys makeWASocket)
 │   ├── handleConnectionUpdate()             → open/close/QR
 │   ├── scheduleReconnect()                  → exponential backoff (5s-120s)
 │   ├── startHealthCheck()                   → 30s interval, triggers reconnect
 │   ├── getEffectiveStatus()                 → DUAL-SOURCE: config status ∩ socket nullity
+│   ├── getReadinessStatus()                 → ready/no-contacts/not-connected/no-credentials
 │   └── setStatusCallback()                  → pushes status labels to TUI
 ├── MenuHandler (TUI /whatsapp command)
 ├── RecentsService (message history)
@@ -35,87 +53,17 @@ whatsapp-pi.ts (entry point)
 └── AudioService
 ```
 
-## Diagnostic Architecture (Post a8c3153)
-
-### Dual-Source Status: `getEffectiveStatus()`
-
-The extension uses **two sources of truth** for connection status:
-
-| Source | Method | What it checks |
-|--------|--------|----------------|
-| Config state | `sessionManager.getStatus()` | `connectionState.status` in `config.json` |
-| Socket reality | `this.socket` reference | Actual Baileys socket object (null → not connected) |
-
-`WhatsAppService.getEffectiveStatus()` cross-checks:
-```typescript
-if (status === 'connected' && !this.socket) {
-    return 'disconnected'; // Config says connected but socket is gone
-}
-```
-
-This prevents the TUI from showing "Connected" when the socket has been garbage-collected or never created. The TUI status callback pushes the **effective** status via `whatsappService.getEffectiveStatus()`.
-
-### `setConnectionState()` vs deprecated `setStatus()`
-
-| Method | Status | Persistence | Usage |
-|--------|--------|-------------|-------|
-| `setConnectionState(partial)` | ✅ Current | Debounced (200ms) | `whatsapp-pi.ts` entry point |
-| `setStatus(status)` | ⚠️ Deprecated | Immediate (`flushConfig`) | Legacy fallback only |
-
-`ConnectionState` includes diagnostics beyond status: `lastError`, `lastErrorTime`, `connectedSince`, `lastMessageReceived`, `reconnectAttempts`, `uptimeMs`.
-
-### Debounced Config Writes
-
-- `saveConfig()` — coalesces writes within 200ms. Callers that don't need immediate persistence use this.
-- `flushConfig()` — immediate atomic write (tempfile + rename). Used by `syncAuthStateFromDisk()` and critical paths.
-- `flushPendingSave()` — called on `session_shutdown` to drain any pending debounced write.
-
-### Concurrency Guard: `ensureInitialized()`
-
-First call starts async init; concurrent calls await the same `_initPromise`. Errors are logged (not swallowed). Prevents:
-- Parallel `loadConfig()` races
-- Config state corruption from double-initialization
-
-## Connection Flow
-
-### Auto-Connect (startup with --whatsapp-pi-online)
-```
-session_start
-  → ensureInitialized() → loadConfig() → syncAuthStateFromDisk()
-  → isRegistered() → hasCredentialsFile() checks creds.json directly
-  → if (isWhatsappPiOn && registered) → auto-connect with 4 retries
-  → else → notify user to connect manually
-```
-
-### Manual Connect (TUI /whatsapp → "Connect WhatsApp")
-```
-MenuHandler.handleCommand()
-  → whatsappService.start()
-    → createSocket() → getAuthState() → makeWASocket()
-    → registerSocketListeners()
-      → connection.update
-        → qr → handlePairingQr() → show QR
-        → open → handleConnectionOpen() → set status=connected
-        → close → handleConnectionClosed() → reconnect or logout
-```
-
-### Shutdown Flow
-```
-Pi emits "session_shutdown"
-  → whatsappService.stop()
-  → sessionManager.flushPendingSave() // drain debounce buffer
-```
-
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `whatsapp-pi.ts` | Entry point, flag registration, session_start handler, tool/command registration |
-| `src/services/session.manager.ts` | Auth state persistence, config, allow-lists |
-| `src/services/whatsapp.service.ts` | Baileys socket, reconnect, health check, effective status |
+| `whatsapp-pi.ts` | Entry point, flags, tools, commands, lifecycle |
+| `src/services/session.manager.ts` | 🔴 Config persistence, auth state, allow-lists |
+| `src/services/whatsapp.service.ts` | 🔴 Socket lifecycle, reconnect, readiness |
 | `src/ui/menu.handler.ts` | /whatsapp TUI menu |
-| `src/models/whatsapp.types.ts` | SessionStatus, ConnectionState types |
+| `src/models/whatsapp.types.ts` | SessionStatus, ConnectionState, ReadinessStatus |
 | `~/.pi/whatsapp-pi/config.json` | Persistent config |
+| `~/.pi/whatsapp-pi/config-audit.log` | Write trace log |
 | `~/.pi/whatsapp-pi/auth/creds.json` | Baileys credentials |
 | `~/.pi/whatsapp-pi/whatsapp-pi.log` | File-based log |
 
@@ -130,21 +78,13 @@ pairing       → QR code displayed for pairing
 error         → Connection error (check lastError)
 ```
 
-## Resolved Bugs (post a8c3153)
-
-### ✅ `isRegistered()` now checks creds.json directly
-- **Before:** Depended on `hasAuthState` being pre-loaded from config — config load race could leave it `false`
-- **After:** `hasCredentialsFile()` reads `creds.json` from disk — independent of config loading
-- `ensureInitialized()` has concurrency guard + error logging (no more silent catch)
-
-### ✅ `saveConfig()` debounced at 200ms
-- **Before:** Every state change fired a config write — rapid changes interleaved
-- **After:** `saveConfig()` debounces, `flushConfig()` for critical paths, `flushPendingSave()` on shutdown
-
-### ⚠️ `loadConfig()` resets connected→disconnected (expected behavior)
-- Intentional — connection is not inherited across restarts
-- `isTransientStatus` = [connected, connecting, reconnecting] → forced to 'disconnected'
-- The effective status check (`getEffectiveStatus()`) provides the real socket state
+## ReadinessStatus States
+```
+ready          → Socket open + at least one contact/group authorized
+no-contacts    → Socket open but allowList empty and no bound group
+not-connected  → Socket not open
+no-credentials → No WhatsApp auth stored
+```
 
 ## Testing Connection
 ```bash
@@ -152,7 +92,10 @@ error         → Connection error (check lastError)
 ls -la ~/.pi/whatsapp-pi/auth/creds.json
 
 # Check config state
-cat ~/.pi/whatsapp-pi/config.json | grep -E 'status|hasAuthState'
+cat ~/.pi/whatsapp-pi/config.json | grep -E 'status|hasAuthState|allowList|allowedGroups'
+
+# Check write audit trail
+tail -20 ~/.pi/whatsapp-pi/config-audit.log
 
 # View recent logs
 tail -50 ~/.pi/whatsapp-pi/whatsapp-pi.log
@@ -166,3 +109,11 @@ pi --whatsapp-pi-online
 # Verbose mode for debugging:
 pi --whatsapp-pi-online --whatsapp-verbose
 ```
+
+## Related Documents
+- `AGENTS.md` — Project guidelines and guard references
+- `REVIEW-CHECKLIST.md` — Pre-review verification checklist
+- `AUDIT-COMPREHENSIVE.md` — Full 2026-05-19 audit
+- `TEST-GAP-ANALYSIS.md` — Test coverage gaps
+- `STRATEGY-v2-rebase.md` — SDK rebase plan
+- `.pi/skills/whatsapp-pi-guard.md` — Auto-loaded guard skill

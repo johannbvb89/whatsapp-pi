@@ -296,4 +296,52 @@ describe('WhatsAppService Filtering', () => {
         });
     });
 
+    // === READINESS STATUS TESTS (Phase 5) ===
+
+    describe('Readiness status', () => {
+        it('should return not-connected when status is disconnected', () => {
+            expect(whatsappService.getReadinessStatus()).toBe('not-connected');
+        });
+
+        it('should return no-contacts when connected but allow list is empty and no groups', async () => {
+            await sessionManager.setStatus('connected');
+            (whatsappService as any).socket = {};
+
+            expect(whatsappService.getReadinessStatus()).toBe('no-contacts');
+        });
+
+        it('should return ready when connected with at least one contact', async () => {
+            await sessionManager.setStatus('connected');
+            (whatsappService as any).socket = {};
+            await sessionManager.addNumber('+5511999998888');
+
+            expect(whatsappService.getReadinessStatus()).toBe('ready');
+        });
+
+        it('should return groups-only when connected with groups but no contacts and no binding', async () => {
+            await sessionManager.setStatus('connected');
+            (whatsappService as any).socket = {};
+            await sessionManager.addAllowedGroup('120363012345@g.us');
+
+            expect(whatsappService.getReadinessStatus()).toBe('groups-only');
+        });
+
+        it('should return ready when connected with a bound group even with 0 contacts', async () => {
+            await sessionManager.setStatus('connected');
+            (whatsappService as any).socket = {};
+            whatsappService.setGroupBinding('120363012345@g.us');
+
+            expect(whatsappService.getReadinessStatus()).toBe('ready');
+        });
+
+        it('should return ready when connected with contacts and groups', async () => {
+            await sessionManager.setStatus('connected');
+            (whatsappService as any).socket = {};
+            await sessionManager.addNumber('+5511999998888');
+            await sessionManager.addAllowedGroup('120363012345@g.us');
+
+            expect(whatsappService.getReadinessStatus()).toBe('ready');
+        });
+    });
+
 });

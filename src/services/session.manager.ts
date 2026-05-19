@@ -1,6 +1,7 @@
 import { useMultiFileAuthState } from 'baileys';
 import { join } from 'path';
 import { readFile, writeFile, mkdir, rm, rename } from 'fs/promises';
+import { appendFileSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { SessionStatus, ConnectionState } from '../models/whatsapp.types.js';
 import { t } from '../i18n.js';
@@ -43,6 +44,7 @@ export class SessionManager {
     private visionModel: string = 'gpt-4o';
     private operatorJid: string = '';
     private _initPromise: Promise<void> | null = null;
+    private _initialized = false;
     private _saveTimer: ReturnType<typeof setTimeout> | null = null;
     private _savePending = false;
 
@@ -58,6 +60,10 @@ export class SessionManager {
     }
 
     public async ensureInitialized() {
+        if (this._initialized) {
+            console.warn(`[SessionManager] ensureInitialized called AGAIN (PID ${process.pid}) — skipping reload to prevent state reset`);
+            return;
+        }
         // Prevent concurrent initialization races
         if (this._initPromise) {
             return this._initPromise;
@@ -74,6 +80,7 @@ export class SessionManager {
         })();
         try {
             await this._initPromise;
+            this._initialized = true;
         } finally {
             this._initPromise = null;
         }
@@ -229,15 +236,56 @@ export class SessionManager {
             };
             await mkdir(this.baseDir, { recursive: true });
             const serialized = JSON.stringify(config, null, 2);
-            await writeFile(tempPath, serialized);
+
+            // AUDIT LOG: trace every config write (sync — must not race with test cleanup)
+            // Always writes to production path, never test temp dirs
+            const auditDir = join(homedir(), '.pi', 'whatsapp-pi');
+            const auditPath = join(auditDir, 'config-audit.log');
+            const stackTrace = new Error().stack?.split('\n').slice(2, 7).map(s => s.trim()).join(' ← ') || 'no-stack';
+            const auditEntry = JSON.stringify({
+                ts: new Date().toISOString(),
+                pid: process.pid,
+                allowListLen: this.allowList.length,
+                allowedGroupsLen: this.allowedGroups.length,
+                status: this.connectionState.status,
+                stack: stackTrace
+            });
+            try { mkdirSync(auditDir, { recursive: true }); appendFileSync(auditPath, auditEntry + '\n'); } catch { /* best-effort diagnostic */ }
+
+            // Write with retry for Windows robustness
+            let written = false;
+            for (let attempt = 0; attempt < 3 && !written; attempt++) {
+                try {
+                    await writeFile(tempPath, serialized);
+                    const stat = await readFile(tempPath);
+                    if (stat.length === 0) {
+                        throw new Error('writeFile produced zero-byte file');
+                    }
+                    written = true;
+                } catch (writeError) {
+                    if (attempt === 2) throw writeError;
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            }
             try {
                 await rename(tempPath, this.configPath);
             } catch {
                 // Windows EPERM: atomic rename failed (file locked). Fall back to direct write.
-                await writeFile(this.configPath, serialized);
+                console.warn(`[SessionManager] rename failed (EPERM?), falling back to direct write`);
+                // Retry direct write on fallback path
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    try {
+                        await writeFile(this.configPath, serialized);
+                        break;
+                    } catch (writeError) {
+                        if (attempt === 2) throw writeError;
+                        await new Promise(r => setTimeout(r, 100));
+                    }
+                }
                 await rm(tempPath, { force: true }).catch(() => {});
             }
         } catch (error) {
+            console.error(`[SessionManager] flushConfig FAILED: ${error instanceof Error ? error.message : String(error)}`);
             await rm(tempPath, { force: true }).catch(() => {});
             console.error(t('session.manager.failedSaveConfig'), error);
         }
@@ -297,19 +345,19 @@ export class SessionManager {
             }
             this.allowList.push({ number: cleanNumber, name });
             this.ignoredNumbers = this.ignoredNumbers.filter(c => c.number !== cleanNumber);
-            await this.saveConfig();
+            await this.flushConfig();
             return;
         }
 
         if (name && !existing.name) {
             existing.name = name;
-            await this.saveConfig();
+            await this.flushConfig();
         }
     }
 
     async removeNumber(number: string) {
         this.allowList = this.allowList.filter(c => c.number !== number);
-        await this.saveConfig();
+        await this.flushConfig();
     }
 
     async addAllowedGroup(groupJid: string, name?: string) {
@@ -322,19 +370,19 @@ export class SessionManager {
         if (!existing) {
             this.allowedGroups.push({ number: groupJid, name });
             this.ignoredNumbers = this.ignoredNumbers.filter(c => c.number !== groupJid);
-            await this.saveConfig();
+            await this.flushConfig();
             return;
         }
 
         if (name && !existing.name) {
             existing.name = name;
-            await this.saveConfig();
+            await this.flushConfig();
         }
     }
 
     async removeAllowedGroup(groupJid: string) {
         this.allowedGroups = this.allowedGroups.filter(c => c.number !== groupJid);
-        await this.saveConfig();
+        await this.flushConfig();
     }
 
     async setAllowedContactAlias(number: string, alias: string) {
@@ -513,7 +561,11 @@ export class SessionManager {
     /** Update connection state partially and persist (debounced) */
     async setConnectionState(partial: Partial<ConnectionState>) {
         this.connectionState = { ...this.connectionState, ...partial };
-        void this.saveConfig();
+        try {
+            await this.saveConfig();
+        } catch (error) {
+            console.error(`[SessionManager] setConnectionState save failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     /** @deprecated Use getConnectionState() for full diagnostics */

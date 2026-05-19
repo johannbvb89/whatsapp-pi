@@ -162,4 +162,151 @@ describe('SessionManager', () => {
 
         expect(sessionManager.getAllowedGroups()).toEqual([{ number: '120363012345@g.us', name: 'Team' }]);
     });
+
+    // === PERSISTENCE CYCLE TESTS (Phase 5 — would have caught config overwrite bugs) ===
+
+    it('should persist contacts across save → reload cycle', async () => {
+        await sessionManager.addNumber('+5511999998888', 'Ana');
+
+        // Create a new SessionManager reading the same config directory
+        const sm2 = new SessionManager(dataDir);
+        await sm2.ensureInitialized();
+
+        const allowList = sm2.getAllowList();
+        expect(allowList).toHaveLength(1);
+        expect(allowList[0].number).toBe('+5511999998888');
+        expect(allowList[0].name).toBe('Ana');
+    });
+
+    it('should persist removed contacts across save → reload cycle', async () => {
+        await sessionManager.addNumber('+5511999998888');
+        await sessionManager.removeNumber('+5511999998888');
+
+        const sm2 = new SessionManager(dataDir);
+        await sm2.ensureInitialized();
+
+        expect(sm2.getAllowList()).toEqual([]);
+    });
+
+    it('should persist groups across save → reload cycle', async () => {
+        await sessionManager.addAllowedGroup('120363012345@g.us', 'Team');
+
+        const sm2 = new SessionManager(dataDir);
+        await sm2.ensureInitialized();
+
+        const groups = sm2.getAllowedGroups();
+        expect(groups).toHaveLength(1);
+        expect(groups[0].number).toBe('120363012345@g.us');
+        expect(groups[0].name).toBe('Team');
+    });
+
+    it('should persist 3 rapid additions as a single write', async () => {
+        // Rapid additions — each calls flushConfig() directly now (no debounce)
+        await sessionManager.addNumber('+111');
+        await sessionManager.addNumber('+222');
+        await sessionManager.addNumber('+333');
+
+        const sm2 = new SessionManager(dataDir);
+        await sm2.ensureInitialized();
+
+        // All 3 must survive
+        expect(sm2.getAllowList()).toHaveLength(3);
+        const numbers = sm2.getAllowList().map(c => c.number);
+        expect(numbers).toContain('+111');
+        expect(numbers).toContain('+222');
+        expect(numbers).toContain('+333');
+    });
+
+    // === DOUBLE-INIT GUARD TESTS ===
+
+    it('should not lose contacts when ensureInitialized() is called twice', async () => {
+        await sessionManager.ensureInitialized();
+        await sessionManager.addNumber('+5511999998888');
+
+        // Second init — must be a no-op, NOT reload from disk
+        await sessionManager.ensureInitialized();
+
+        expect(sessionManager.getAllowList()).toHaveLength(1);
+        expect(sessionManager.getAllowList()[0].number).toBe('+5511999998888');
+    });
+
+    it('should not lose in-memory state when ensureInitialized() races with mutation', async () => {
+        await sessionManager.ensureInitialized();
+        await sessionManager.addNumber('+5511999998888');
+
+        // Simulate second init (like a session event trigger)
+        await sessionManager.ensureInitialized();
+
+        // State must be preserved — contact still there
+        expect(sessionManager.getAllowList()).toHaveLength(1);
+
+        // Config on disk must also have the contact
+        const sm2 = new SessionManager(dataDir);
+        await sm2.ensureInitialized();
+        expect(sm2.getAllowList()).toHaveLength(1);
+    });
+
+    // === CONNECTION STATE TESTS ===
+
+    it('should persist connection state across set → reload cycle', async () => {
+        await sessionManager.ensureInitialized();
+        await sessionManager.setConnectionState({
+            status: 'connected',
+            connectedSince: Date.now(),
+            reconnectAttempts: 3
+        });
+
+        // Drain debounce — setConnectionState uses saveConfig (debounced 200ms)
+        await (sessionManager as any).flushPendingSave();
+
+        const sm2 = new SessionManager(dataDir);
+        await sm2.ensureInitialized();
+
+        const state = sm2.getConnectionState();
+        // Status resets to disconnected (transient status logic in loadConfig)
+        expect(state.status).toBe('disconnected');
+        // But reconnectAttempts should survive
+        expect(state.reconnectAttempts).toBe(3);
+    });
+
+    // === CONFIG RECOVERY TESTS ===
+
+    it('should recover from missing config file with defaults', async () => {
+        // No config written — ensureInitialized should not throw
+        await sessionManager.ensureInitialized();
+        // syncAuthStateFromDisk forces 'disconnected' when no creds exist
+        expect(sessionManager.getStatus()).toBe('disconnected');
+        expect(sessionManager.getAllowList()).toEqual([]);
+        expect(sessionManager.getAllowedGroups()).toEqual([]);
+    });
+
+    it('should recover from empty config file without throwing', async () => {
+        const configPath = join(dataDir, 'config.json');
+        await writeFile(configPath, '');
+
+        // Should not throw
+        await sessionManager.ensureInitialized();
+        expect(sessionManager.getAllowList()).toEqual([]);
+    });
+
+    it('should unroll deeply nested number objects', async () => {
+        await sessionManager.addNumber({
+            number: { number: { number: '+5511999998888' } }
+        });
+
+        const allowList = sessionManager.getAllowList();
+        expect(allowList).toHaveLength(1);
+        expect(allowList[0].number).toBe('+5511999998888');
+    });
+
+    it('should correctly route group JIDs to allowedGroups even from addNumber', async () => {
+        await sessionManager.addNumber('120363012345@g.us', 'Test Group');
+
+        // Should NOT be in allowList
+        expect(sessionManager.getAllowList()).toEqual([]);
+        // Should be in allowedGroups
+        expect(sessionManager.getAllowedGroups()).toHaveLength(1);
+        expect(sessionManager.getAllowedGroups()[0].number).toBe('120363012345@g.us');
+        expect(sessionManager.getAllowedGroups()[0].name).toBe('Test Group');
+    });
 });

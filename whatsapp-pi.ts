@@ -88,6 +88,7 @@ export default function (pi: ExtensionAPI) {
         // Reset connection state — status from previous session is not inherited
         const loadedState = sessionManager.getConnectionState();
         logger.log(`[WhatsApp-Pi] Loaded state: status=${loadedState.status}`);
+        logger.log(`[WhatsApp-Pi] Config on disk: allowList=${sessionManager.getAllowList().length} contacts, allowedGroups=${sessionManager.getAllowedGroups().length} groups`);
         whatsappService.setIncomingMessageRecorder(async (message) => {
             const isGroup = message.remoteJid.endsWith('@g.us');
             const senderNumber = isGroup
@@ -109,6 +110,14 @@ export default function (pi: ExtensionAPI) {
             .find(entry => entry.type === "custom" && entry.customType === "whatsapp-state");
         const registered = await sessionManager.isRegistered();
         logger.log(`[WhatsApp-Pi] isRegistered: ${registered}`);
+
+        // AUDIT: log Pi session state restore data
+        if (savedStateEntry) {
+            const restoreData = (savedStateEntry as { data?: any }).data || {};
+            logger.log(`[WhatsApp-Pi] Pi session state found: allowList=${restoreData.allowList?.length || 0} contacts, allowedGroups=${restoreData.allowedGroups?.length || 0} groups, status=${restoreData.status || 'none'}`);
+        } else {
+            logger.log('[WhatsApp-Pi] No Pi session state entry found — config.json is the sole source');
+        }
 
         if (savedStateEntry) {
             const data = (savedStateEntry as { data?: any }).data;
@@ -359,6 +368,16 @@ export default function (pi: ExtensionAPI) {
             _ctx = ctx;
             await menuHandler.handleCommand(ctx);
 
+            // Refresh footer: readiness may have changed (contacts added/removed)
+            const readiness = whatsappService.getReadinessStatus();
+            const statusLabel = readiness === 'ready' ? t('service.whatsapp.ready')
+                : readiness === 'groups-only' ? t('service.whatsapp.connectedGroupsOnly')
+                : readiness === 'no-contacts' ? t('service.whatsapp.readyNoContacts')
+                : undefined;
+            if (statusLabel) {
+                ctx.ui.setStatus('whatsapp', statusLabel);
+            }
+
             // Persist state after changes
             pi.appendEntry("whatsapp-state", {
                 status: sessionManager.getStatus(),
@@ -386,6 +405,20 @@ export default function (pi: ExtensionAPI) {
                 `Credentials:        ${await sessionManager.isRegistered() ? '✅ VALID' : '❌ MISSING'}`,
                 `Operator JID:       ${sessionManager.getOperatorJid() || '(not set)'}`,
             ];
+
+            // Readiness: are we actually ready to receive & reply?
+            const readiness = whatsappService.getReadinessStatus();
+            const readinessLabel = readiness === 'ready' ? t('status.ready')
+                : readiness === 'groups-only' ? t('status.readyGroupsOnly')
+                : readiness === 'no-contacts' ? t('status.readyNoContacts')
+                : readiness === 'no-credentials' ? 'No Credentials'
+                : 'Not Connected';
+            lines.push(`Readiness:          ${readinessLabel}`);
+
+            const allowedCount = sessionManager.getAllowList().length;
+            const groupCount = sessionManager.getAllowedGroups().length;
+            lines.push(`Allowed Contacts:   ${allowedCount}`);
+            lines.push(`Allowed Groups:     ${groupCount}`);
 
             if (effectiveStatus === 'connected') {
                 lines.push(``);
@@ -455,6 +488,12 @@ export default function (pi: ExtensionAPI) {
                 }
             }
         }
+    });
+
+    // Flush config before session switch/quit — prevents data loss during /new, /resume, /fork
+    pi.on("session_before_switch", async () => {
+        logger.log("[WhatsApp-Pi] Session before switch — flushing pending config...");
+        await sessionManager.flushPendingSave();
     });
 
     pi.on("session_shutdown", async () => {
