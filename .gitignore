@@ -20,6 +20,8 @@ Thumbs.db
 *.tmp
 *.swp
 
+# Test phone numbers — never commit personal numbers here
+
 # Pi Extension Data
 .pi/extensions/whatsapp/auth/
 .pi-data/
