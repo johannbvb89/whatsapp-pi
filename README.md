@@ -5,7 +5,7 @@
 # WhatsApp-Pi
 [![GitHub](https://img.shields.io/badge/github-repo-black.svg?style=flat-square&logo=github)](https://github.com/RaphaCastelloes/whatsapp-pi)
 
-A WhatsApp integration extension for the **[Pi Coding Agent](https://github.com/mariozechner/pi-coding-agent)**. 
+A WhatsApp integration extension for the **[Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent)**. 
 
 Pi is a powerful agentic AI coding assistant that operates in your terminal. This extension lets you chat and pair-program with your Pi agent through WhatsApp, with message filtering, allowed contacts/groups, recents/history browsing, message detail/reply, group-only binding, and reliable message delivery.
 
@@ -19,7 +19,6 @@ Pi is a powerful agentic AI coding assistant that operates in your terminal. Thi
   - Manage aliases and print allowed contacts from the menu
 - **Allowed Groups**: Control which WhatsApp groups can interact with Pi
   - Add group JIDs with optional aliases
-  - Choose reaction mode per group: **Active** (reply to all allowed group messages) or **Passive** (reply only when mentioned with @)
   - Only groups in Allowed Groups are processed by the agent
 - **Recents & History**: Browse recent conversations, inspect full message history, and reply from message detail view
 - **Reliable Messaging**: Queue-based message sending with retry logic
@@ -84,7 +83,7 @@ pi -e whatsapp-pi.ts
 
 For verbose mode (shows Baileys trace logs for debugging):
 ```bash
-pi -e whatsapp-pi.ts --verbose
+pi -e whatsapp-pi.ts --whatsapp-verbose
 ```
 
 To test startup auto-connect locally after you have already paired WhatsApp:
@@ -125,8 +124,7 @@ pi -e whatsapp-pi.ts --whatsapp-pi-online
 
 ### Allowed Groups Management
 - **Add Group** - Add a WhatsApp group JID to the allowed groups list (format: 120363012345@g.us)
-- **Select a group** - Open a submenu with **History**, **Send Message**, **Print Group JID**, **Reaction Mode**, alias actions, **Remove Group**, and **Back**
-- **Reaction Mode** - Switch between **Active** and **Passive** behavior for that group
+- **Select a group** - Open a submenu with **History**, **Send Message**, **Print Group JID**, alias actions, **Remove Group**, and **Back**
 - **Back** - Return to main menu
 
 ### Recents Management
@@ -162,11 +160,12 @@ npm test
 
 - **Auto-Connect Support**: Use the `--whatsapp-pi-online` flag to connect on startup when credentials already exist.
 - **Group-Only Mode**: Use `--whatsapp-group <jid>` to bind Pi to a single WhatsApp group. The group must also be present in Allowed Groups.
-- **Allowed Group Reaction Mode**: Each allowed group can be set to Active or Passive. Passive mode only replies when the bot is directly mentioned with @.
+- **Connection Reliability**: Automatic reconnection with exponential backoff (up to 120s). Session persistence via `~/.pi/whatsapp-pi/auth/`.
+- **Config Persistence**: Allowed contacts, groups, and settings persist across Pi restarts and system reboots.
+- **Readiness States**: Accurate status reporting — `Ready ✅`, `Groups only ⚠️`, `No Contacts ⚠️`, `Disconnected`.
 - **Recents Store**: Recent conversations and message history are persisted in `~/.pi/whatsapp-pi/recents/recents.json`.
 - **Message Detail / Reply**: Open a message from history to inspect full content and reply with `R`.
 - **Media Support**: Images are forwarded for vision analysis, audio is transcribed with Whisper, and PDFs are saved under `./.pi-data/whatsapp/documents/` with local text preview when available.
 - **Session Handling**: Saved state, allow list, and startup reconnects are restored automatically when available.
 - **Intelligent Message Filtering**: Messages ending with `π` are ignored to prevent bot loops.
-- **Storage Management**: Persistent data lives under `.pi-data/` plus the recents store in the user home directory.
-- **Improved Test Coverage (v1.0.56)**: Added unit tests for the `message_end` auto-reply handler, covering the happy path, disconnected guard, role guard, send failure, thrown exceptions, and the `send_wa_message` dedup flag. Fixed a Windows path separator bug in the recents service test suite.
+- **Storage Management**: Persistent data lives under `~/.pi/whatsapp-pi/` plus the recents store.
