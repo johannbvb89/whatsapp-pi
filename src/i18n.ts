@@ -1,12 +1,10 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type Locale = "pt-BR" | "es" | "fr";
 type Key = keyof typeof fallback;
 type Params = Record<string, string | number | undefined>;
 
 let currentLocale: string | undefined;
-
-const namespace = "whatsapp-pi";
 
 const fallback = {
     "tool.label": "Send WhatsApp Message",
@@ -711,40 +709,23 @@ export function resetI18n(): void {
 }
 
 export function initI18n(pi: ExtensionAPI): void {
-    const forcedLocale = getLocaleOverride();
-    if (forcedLocale) {
-        currentLocale = forcedLocale;
+    // Register the locale override flag with Pi's flag system
+    pi.registerFlag("whatsapp-pi-locale", {
+        description: "Force WhatsApp-Pi locale (pt-BR, es, fr, en)",
+        type: "string",
+        default: ""
+    });
+
+    // Priority 1: Environment variable override (WHATSAPP_PI_LOCALE)
+    const envLocale = getLocaleOverride();
+    if (envLocale) {
+        currentLocale = envLocale;
+        return;
     }
 
-    pi.events?.emit?.("pi-core/i18n/registerBundle", {
-        namespace,
-        defaultLocale: "en",
-        fallback,
-        translations,
-    });
-    pi.events?.on?.("pi-core/i18n/localeChanged", (event: unknown) => {
-        if (forcedLocale) {
-            return;
-        }
-
-        if (event && typeof event === "object" && "locale" in event) {
-            const locale = String((event as { locale?: unknown }).locale ?? "");
-            if (locale) {
-                currentLocale = locale;
-            }
-        }
-    });
-    pi.events?.emit?.("pi-core/i18n/requestApi", {
-        namespace,
-        onApi(api: { getLocale?: () => string | undefined }) {
-            if (forcedLocale) {
-                return;
-            }
-
-            const locale = api.getLocale?.();
-            if (locale) {
-                currentLocale = locale;
-            }
-        },
-    });
+    // Priority 2: CLI flag override (--whatsapp-pi-locale=...)
+    const flagLocale = pi.getFlag("whatsapp-pi-locale") as string | undefined;
+    if (flagLocale) {
+        currentLocale = flagLocale;
+    }
 }

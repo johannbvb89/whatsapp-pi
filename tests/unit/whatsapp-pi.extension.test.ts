@@ -173,7 +173,7 @@ describe('whatsapp-pi extension', () => {
 
         registerExtension(pi as any);
 
-        expect(pi.flags.has('verbose')).toBe(true);
+        expect(pi.flags.has('whatsapp-verbose')).toBe(true);
         expect(pi.flags.has('whatsapp-pi-online')).toBe(true);
         expect(pi.flags.has('whatsapp-group')).toBe(true);
         expect(pi.commands.has('whatsapp')).toBe(true);

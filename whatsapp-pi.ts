@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { SessionManager } from './src/services/session.manager.js';
 import type { SessionStatus } from './src/models/whatsapp.types.js';
@@ -11,19 +11,12 @@ import { IncomingMediaService } from './src/services/incoming-media.service.js';
 import { WhatsAppPiLogger } from './src/services/whatsapp-pi.logger.js';
 import { initI18n, t } from './src/i18n.js';
 
-const shutdownState = globalThis as typeof globalThis & {
-    __whatsappPiShutdown?: {
-        installed: boolean;
-        stop?: () => Promise<void>;
-    };
-};
-
 export default function (pi: ExtensionAPI) {
     initI18n(pi);
 
-    // Register verbose flag
-    pi.registerFlag("verbose", {
-        description: "Enable verbose mode (show Baileys trace logs)",
+    // Register WhatsApp-specific verbose flag (NOT Pi's built-in --verbose)
+    pi.registerFlag("whatsapp-verbose", {
+        description: "Enable WhatsApp-Pi verbose mode (show Baileys trace logs)",
         type: "boolean",
         default: false
     });
@@ -49,25 +42,7 @@ export default function (pi: ExtensionAPI) {
     const menuHandler = new MenuHandler(whatsappService, sessionManager, recentsService);
     let _ctx: ExtensionContext | undefined;
 
-    const installGracefulShutdownHandlers = () => {
-        shutdownState.__whatsappPiShutdown ??= { installed: false };
-        if (shutdownState.__whatsappPiShutdown.installed) {
-            return;
-        }
 
-        shutdownState.__whatsappPiShutdown.installed = true;
-        
-        const shutdown = async (reason: string) => {
-            try {
-                await shutdownState.__whatsappPiShutdown?.stop?.();
-            } catch (error) {
-                logger.error(`[WhatsApp-Pi] Graceful shutdown failed during ${reason}:`, error);
-            }
-        };
-
-        process.once('SIGINT', () => { void shutdown('SIGINT'); });
-        process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
-    };
 
     // Initial status setup
     pi.on("session_start", async (_event, ctx) => {
@@ -75,10 +50,9 @@ export default function (pi: ExtensionAPI) {
         logger.log('[WhatsApp-Pi] ========================================');
         logger.log('[WhatsApp-Pi] session_start: initializing...');
 
-        // Check verbose mode
-        const isVerboseFlagSet = process.argv.includes("--verbose");
-        const isVerbose = isVerboseFlagSet;
-        logger.log(`[WhatsApp-Pi] --verbose: ${isVerbose}`);
+        // Check verbose mode via Pi's flag system
+        const isVerbose = pi.getFlag("whatsapp-verbose") === true;
+        logger.log(`[WhatsApp-Pi] --whatsapp-verbose: ${isVerbose}`);
 
         whatsappService.setVerboseMode(isVerbose);
         logger.setVerbose(isVerbose);
@@ -114,14 +88,6 @@ export default function (pi: ExtensionAPI) {
         // Reset connection state — status from previous session is not inherited
         const loadedState = sessionManager.getConnectionState();
         logger.log(`[WhatsApp-Pi] Loaded state: status=${loadedState.status}`);
-
-        installGracefulShutdownHandlers();
-        shutdownState.__whatsappPiShutdown = {
-            installed: shutdownState.__whatsappPiShutdown?.installed ?? false,
-            stop: async () => {
-                await whatsappService.stop();
-            }
-        };
         whatsappService.setIncomingMessageRecorder(async (message) => {
             const isGroup = message.remoteJid.endsWith('@g.us');
             const senderNumber = isGroup
