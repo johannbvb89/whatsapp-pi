@@ -1,4 +1,25 @@
-export type SessionStatus = 'logged-out' | 'pairing' | 'connected' | 'disconnected';
+export type SessionStatus =
+    | 'logged-out'      // No credentials stored
+    | 'disconnected'    // Credentials exist but not connected
+    | 'connecting'      // Connection attempt in progress
+    | 'connected'       // Socket open, messages flowing
+    | 'reconnecting'    // Connection lost, reconnect in progress
+    | 'pairing'         // QR code displayed for pairing
+    | 'error';          // Connection error (check lastError for details)
+
+/**
+ * Full connection state persisted to config and available via /whatsapp-status.
+ * All fields are optional to maintain backward compatibility.
+ */
+export interface ConnectionState {
+    status: SessionStatus;
+    lastError?: string;
+    lastErrorTime?: number;
+    connectedSince?: number;       // Timestamp when last successful connection was established
+    lastMessageReceived?: number;  // Timestamp of last incoming message
+    reconnectAttempts: number;
+    uptimeMs: number;              // How long the current connection has been alive (0 when disconnected)
+}
 
 export interface WhatsAppSession {
     id: string;

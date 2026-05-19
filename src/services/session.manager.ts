@@ -2,7 +2,7 @@ import { useMultiFileAuthState } from 'baileys';
 import { join } from 'path';
 import { readFile, writeFile, mkdir, rm, rename } from 'fs/promises';
 import { homedir } from 'os';
-import { SessionStatus } from '../models/whatsapp.types.js';
+import { SessionStatus, ConnectionState } from '../models/whatsapp.types.js';
 import { t } from '../i18n.js';
 
 export interface Contact {
@@ -30,7 +30,11 @@ export class SessionManager {
         this.authStateDir = join(this.baseDir, `auth-${sanitized}`);
     }
 
-    private status: SessionStatus = 'logged-out';
+    private connectionState: ConnectionState = {
+        status: 'logged-out',
+        reconnectAttempts: 0,
+        uptimeMs: 0
+    };
     private allowList: Contact[] = [];
     private allowedGroups: Contact[] = [];
     private ignoredNumbers: Contact[] = [];
@@ -87,7 +91,18 @@ export class SessionManager {
             this.allowList = loadedAllowList.filter(c => !SessionManager.isGroupJid(c.number));
             this.allowedGroups = this.mergeContacts(loadedAllowedGroups, migratedGroups);
             this.ignoredNumbers = (config.ignoredNumbers || []).map(cleanContact).filter(Boolean) as Contact[];
-            this.status = config.status || 'logged-out';
+            // Load connection state from config, resetting transient statuses
+            const loadedStatus: SessionStatus = config.status || 'logged-out';
+            const isTransientStatus = loadedStatus === 'connected' || loadedStatus === 'connecting' || loadedStatus === 'reconnecting';
+            this.connectionState = {
+                status: isTransientStatus ? 'disconnected' : loadedStatus,
+                lastError: config.lastError || undefined,
+                lastErrorTime: config.lastErrorTime || undefined,
+                connectedSince: isTransientStatus ? undefined : (config.connectedSince || undefined),
+                lastMessageReceived: config.lastMessageReceived || undefined,
+                reconnectAttempts: config.reconnectAttempts || 0,
+                uptimeMs: 0  // Always reset on load — connection is not inherited
+            };
             this.hasAuthState = Boolean(config.hasAuthState);
             this.openaiKey = config.openaiKey || '';
             this.visionModel = config.visionModel || 'gpt-4o';
@@ -162,11 +177,16 @@ export class SessionManager {
                 allowList: this.allowList,
                 allowedGroups: this.allowedGroups,
                 ignoredNumbers: this.ignoredNumbers,
-                status: this.status,
+                status: this.connectionState.status,
                 hasAuthState: this.hasAuthState,
                 openaiKey: this.openaiKey,
                 visionModel: this.visionModel,
-                operatorJid: this.operatorJid
+                operatorJid: this.operatorJid,
+                lastError: this.connectionState.lastError,
+                lastErrorTime: this.connectionState.lastErrorTime,
+                connectedSince: this.connectionState.connectedSince,
+                lastMessageReceived: this.connectionState.lastMessageReceived,
+                reconnectAttempts: this.connectionState.reconnectAttempts
             };
             await mkdir(this.baseDir, { recursive: true });
             const serialized = JSON.stringify(config, null, 2);
@@ -390,13 +410,15 @@ export class SessionManager {
 
     private async syncAuthStateFromDisk() {
         const nextHasAuthState = await this.hasCredentialsFile();
-        const nextStatus = nextHasAuthState || this.status !== 'connected'
-            ? this.status
+        const currentStatus = this.connectionState.status;
+        // If credentials exist, keep current status; if lost, force to disconnected
+        const nextStatus: SessionStatus = nextHasAuthState
+            ? currentStatus
             : 'disconnected';
 
-        if (nextHasAuthState !== this.hasAuthState || nextStatus !== this.status) {
+        if (nextHasAuthState !== this.hasAuthState || nextStatus !== currentStatus) {
             this.hasAuthState = nextHasAuthState;
-            this.status = nextStatus;
+            this.connectionState.status = nextStatus;
             await this.saveConfig();
         }
     }
@@ -414,7 +436,11 @@ export class SessionManager {
         try {
             await rm(this.authStateDir, { recursive: true, force: true });
             await mkdir(this.authStateDir, { recursive: true });
-            this.status = 'logged-out';
+            this.connectionState = {
+                status: 'logged-out',
+                reconnectAttempts: 0,
+                uptimeMs: 0
+            };
             this.hasAuthState = false;
             await this.saveConfig();
         } catch (error) {
@@ -422,12 +448,26 @@ export class SessionManager {
         }
     }
 
-    getStatus(): SessionStatus {
-        return this.status;
+    /** Full connection state with diagnostics */
+    getConnectionState(): ConnectionState {
+        return { ...this.connectionState };
     }
 
+    /** Update connection state partially and persist */
+    async setConnectionState(partial: Partial<ConnectionState>) {
+        this.connectionState = { ...this.connectionState, ...partial };
+        // Don't await — fire-and-forget persistence for performance
+        void this.saveConfig();
+    }
+
+    /** @deprecated Use getConnectionState() for full diagnostics */
+    getStatus(): SessionStatus {
+        return this.connectionState.status;
+    }
+
+    /** @deprecated Use setConnectionState() for full diagnostics */
     async setStatus(status: SessionStatus) {
-        this.status = status;
+        this.connectionState.status = status;
         await this.saveConfig();
     }
 

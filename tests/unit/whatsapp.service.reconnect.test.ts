@@ -54,6 +54,8 @@ const createSessionManager = () => ({
     markAuthStateAvailable: vi.fn().mockResolvedValue(undefined),
     getStatus: vi.fn().mockReturnValue('connected'),
     setStatus: vi.fn().mockResolvedValue(undefined),
+    setConnectionState: vi.fn().mockResolvedValue(undefined),
+    getConnectionState: vi.fn().mockReturnValue({ status: 'connected', reconnectAttempts: 0, uptimeMs: 0 }),
     deleteAuthState: vi.fn().mockResolvedValue(undefined),
     isAllowed: vi.fn().mockReturnValue(true),
     isConversationAllowed: vi.fn().mockReturnValue(true)

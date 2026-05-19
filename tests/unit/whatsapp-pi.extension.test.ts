@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => {
         getStatus: vi.fn().mockReturnValue('connected'),
         getAllowList: vi.fn().mockReturnValue([{ number: '+5511999998888', name: 'Ana' }]),
         getAllowedGroups: vi.fn().mockReturnValue([]),
-        setGroupJidForAuth: vi.fn()
+        setGroupJidForAuth: vi.fn(),
+        getConnectionState: vi.fn().mockReturnValue({ status: 'connected', reconnectAttempts: 0, uptimeMs: 0 }),
+        setConnectionState: vi.fn().mockResolvedValue(undefined),
+        getOperatorJid: vi.fn().mockReturnValue('')
     });
 
     const createWhatsAppService = () => ({
@@ -22,6 +25,9 @@ const mocks = vi.hoisted(() => {
         setGroupBinding: vi.fn(),
         getBoundGroupJid: vi.fn().mockReturnValue(null),
         getStatus: vi.fn().mockReturnValue('connected'),
+        getEffectiveStatus: vi.fn().mockReturnValue('connected'),
+        getUptimeMs: vi.fn().mockReturnValue(0),
+        getSocket: vi.fn().mockReturnValue({ user: { id: '123@s.whatsapp.net' } }),
         isVerbose: vi.fn().mockReturnValue(false),
         isRegistered: vi.fn(),
         start: vi.fn().mockResolvedValue(undefined),
@@ -336,7 +342,7 @@ describe('whatsapp-pi extension', () => {
     it('send_wa_message tool reports disconnected status without sending', async () => {
         const registerExtension = await loadExtension();
         const pi = createMockPi();
-        mocks.whatsappService.getStatus.mockReturnValue('disconnected');
+        mocks.whatsappService.getEffectiveStatus.mockReturnValue('disconnected');
 
         registerExtension(pi as any);
         const result = await pi.tools.get('send_wa_message').execute(
@@ -345,11 +351,10 @@ describe('whatsapp-pi extension', () => {
         );
 
         expect(result.isError).toBe(true);
-        expect(JSON.parse(result.content[0].text)).toEqual({
-            success: false,
-            error: 'WhatsApp not connected',
-            attempts: 0
-        });
+        const parsed = JSON.parse(result.content[0].text);
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toContain('WhatsApp not connected');
+        expect(parsed.attempts).toBe(0);
         expect(mocks.whatsappService.sendMessage).not.toHaveBeenCalled();
     });
 

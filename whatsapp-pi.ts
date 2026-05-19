@@ -71,10 +71,13 @@ export default function (pi: ExtensionAPI) {
     // Initial status setup
     pi.on("session_start", async (_event, ctx) => {
         _ctx = ctx;
+        logger.log('[WhatsApp-Pi] ========================================');
+        logger.log('[WhatsApp-Pi] session_start: initializing...');
+
         // Check verbose mode
         const isVerboseFlagSet = process.argv.includes("--verbose");
-
         const isVerbose = isVerboseFlagSet;
+        logger.log(`[WhatsApp-Pi] --verbose: ${isVerbose}`);
 
         whatsappService.setVerboseMode(isVerbose);
         logger.setVerbose(isVerbose);
@@ -82,21 +85,33 @@ export default function (pi: ExtensionAPI) {
         if (isVerbose) {
             logger.log('[WhatsApp-Pi] Verbose mode enabled - Baileys trace logs will be shown');
         }
+
+        // Check startup flags
+        const isWhatsappPiOn = pi.getFlag("whatsapp-pi-online") === true;
+        const boundGroupJid = (pi.getFlag("whatsapp-group") as string) || "";
+        logger.log(`[WhatsApp-Pi] --whatsapp-pi-online: ${isWhatsappPiOn}`);
+        logger.log(`[WhatsApp-Pi] --whatsapp-group: ${boundGroupJid || '(not set)'}`);
+
         ctx.ui.setStatus('whatsapp', '| WhatsApp: Disconnected');
         whatsappService.setStatusCallback((status) => {
             ctx.ui.setStatus('whatsapp', status);
         });
 
         // Set up group binding if configured
-        const boundGroupJid = (pi.getFlag("whatsapp-group") as string) || "";
         if (boundGroupJid) {
             whatsappService.setGroupBinding(boundGroupJid);
             sessionManager.setGroupJidForAuth(boundGroupJid);
             logger.log(`[WhatsApp-Pi] Group-only mode: bound to ${boundGroupJid}`);
         }
 
+        logger.log('[WhatsApp-Pi] Loading session state from disk...');
         await sessionManager.ensureInitialized();
         await recentsService.ensureInitialized();
+
+        // Reset connection state — status from previous session is not inherited
+        const loadedState = sessionManager.getConnectionState();
+        logger.log(`[WhatsApp-Pi] Loaded state: status=${loadedState.status}`);
+
         installGracefulShutdownHandlers();
         shutdownState.__whatsappPiShutdown = {
             installed: shutdownState.__whatsappPiShutdown?.installed ?? false,
@@ -119,11 +134,12 @@ export default function (pi: ExtensionAPI) {
             });
         });
 
+        // Restore allow-list from Pi session state
         const savedStateEntry = [...ctx.sessionManager.getEntries()]
             .reverse()
             .find(entry => entry.type === "custom" && entry.customType === "whatsapp-state");
-        const isWhatsappPiOn = pi.getFlag("whatsapp-pi-online") === true;
         const registered = await sessionManager.isRegistered();
+        logger.log(`[WhatsApp-Pi] isRegistered: ${registered}`);
 
         if (savedStateEntry) {
             const data = (savedStateEntry as { data?: any }).data;
@@ -153,36 +169,61 @@ export default function (pi: ExtensionAPI) {
             }
         }
 
+        // Auto-connect if flag is set and credentials exist
         if (isWhatsappPiOn && registered) {
+            logger.log('[WhatsApp-Pi] Auto-connect: credentials found, starting connection...');
             ctx.ui.setStatus('whatsapp', '| WhatsApp: Auto-connecting...');
 
-            // Retry logic (max 3 attempts, 3s delay)
             let attempts = 0;
             const maxAttempts = 4; // Initial + 3 retries
 
-            const tryConnect = async () => {
+            const tryConnect = async (): Promise<boolean> => {
                 attempts++;
+                logger.log(`[WhatsApp-Pi] Connection attempt ${attempts}/${maxAttempts}`);
                 try {
+                    await sessionManager.setConnectionState({ status: 'connecting' });
                     await whatsappService.start({ allowPairingOnAuthFailure: false });
-                } catch {
+                    logger.log('[WhatsApp-Pi] Connection SUCCESS');
+                    return true;
+                } catch (error) {
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    logger.error(`[WhatsApp-Pi] Connection attempt ${attempts} FAILED: ${errMsg}`);
+                    await sessionManager.setConnectionState({
+                        status: 'error',
+                        lastError: errMsg,
+                        lastErrorTime: Date.now()
+                    });
+
                     if (attempts < maxAttempts) {
-                        ctx.ui.notify(`WhatsApp: Connection attempt ${attempts} failed. Retrying...`, 'warning');
-                        setTimeout(tryConnect, 3000);
+                        ctx.ui.notify(`WhatsApp: Attempt ${attempts}/${maxAttempts} failed. Retrying in 3s...`, 'warning');
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                        return tryConnect();
                     } else {
-                        ctx.ui.notify('WhatsApp: Auto-connect failed after multiple attempts.', 'error');
-                        ctx.ui.setStatus('whatsapp', '|  WhatsApp: Connection Failed');
+                        logger.error(`[WhatsApp-Pi] All ${maxAttempts} connection attempts FAILED`);
+                        ctx.ui.notify('WhatsApp: Auto-connect failed after all attempts. Check logs for details.', 'error');
+                        ctx.ui.setStatus('whatsapp', '| WhatsApp: Connection Failed');
+                        await sessionManager.setConnectionState({ status: 'error' });
+                        return false;
                     }
                 }
             };
 
-            await tryConnect();
+            const connected = await tryConnect();
+            if (connected) {
+                logger.log('[WhatsApp-Pi] Auto-connect: SUCCESS — WhatsApp is now online');
+            } else {
+                logger.error('[WhatsApp-Pi] Auto-connect: FAILED after all retries');
+            }
         } else if (isWhatsappPiOn) {
+            logger.log('[WhatsApp-Pi] Auto-connect: no saved credentials — manual QR pairing required');
             ctx.ui.notify('WhatsApp: Auto-connect requested, but no saved WhatsApp credentials were found. Use Connect WhatsApp once to scan the QR code.', 'warning');
         } else {
+            logger.log('[WhatsApp-Pi] Auto-connect: flag not set — use /whatsapp to connect manually');
             ctx.ui.notify('WhatsApp: Use Connect / Reconnect WhatsApp. QR code will appear only if pairing is needed.', 'info');
         }
 
-        ctx.ui.notify('WhatsApp: Session reset via /new is now fully supported.', 'info');
+        logger.log('[WhatsApp-Pi] session_start: initialization complete');
+        logger.log('[WhatsApp-Pi] ========================================');
     });
 
     // Track whether send_wa_message tool already sent a reply this turn
@@ -278,11 +319,15 @@ export default function (pi: ExtensionAPI) {
                 };
             }
 
-            if (whatsappService.getStatus() !== 'connected') {
+            if (whatsappService.getEffectiveStatus() !== 'connected') {
+                const state = sessionManager.getConnectionState();
+                const detailMsg = state.lastError
+                    ? ` (status: ${state.status}, last error: ${state.lastError})`
+                    : ` (status: ${state.status})`;
                 return {
                     isError: true,
                     details: undefined,
-                    content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: t("tool.error.notConnected"), attempts: 0 }) }]
+                    content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: `${t("tool.error.notConnected")}${detailMsg}`, attempts: 0 }) }]
                 };
             }
 
@@ -354,9 +399,52 @@ export default function (pi: ExtensionAPI) {
         }
     });
 
+    // WhatsApp connection status & diagnostics command
+    pi.registerCommand("whatsapp-status", {
+        description: "Show WhatsApp connection status and diagnostics",
+        handler: async (_args, ctx) => {
+            const state = sessionManager.getConnectionState();
+            const effectiveStatus = whatsappService.getEffectiveStatus();
+            const socket = whatsappService.getSocket();
+            const uptimeSec = effectiveStatus === 'connected' ? Math.floor(whatsappService.getUptimeMs() / 1000) : 0;
+
+            const lines = [
+                `📱 WhatsApp-Pi Status Report`,
+                `================================`,
+                `Config Status:      ${state.status}`,
+                `Effective Status:   ${effectiveStatus}`,
+                `Socket Active:      ${socket ? '✅ YES' : '❌ NO'}`,
+                `Credentials:        ${await sessionManager.isRegistered() ? '✅ VALID' : '❌ MISSING'}`,
+                `Operator JID:       ${sessionManager.getOperatorJid() || '(not set)'}`,
+            ];
+
+            if (effectiveStatus === 'connected') {
+                lines.push(``);
+                lines.push(`Connected Since:    ${state.connectedSince ? new Date(state.connectedSince).toISOString() : 'unknown'}`);
+                lines.push(`Uptime:             ${uptimeSec}s (${Math.floor(uptimeSec / 60)}m ${uptimeSec % 60}s)`);
+                lines.push(`Reconnect Attempts: ${state.reconnectAttempts}`);
+            }
+
+            if (state.status === 'error' || effectiveStatus === 'disconnected') {
+                lines.push(``);
+                lines.push(`Last Error:         ${state.lastError || '(none)'}`);
+                if (state.lastErrorTime) {
+                    lines.push(`Last Error Time:    ${new Date(state.lastErrorTime).toISOString()}`);
+                }
+            }
+
+            lines.push(``);
+            lines.push(`Last Msg Received:  ${state.lastMessageReceived ? new Date(state.lastMessageReceived).toISOString() : 'never'}`);
+            lines.push(`Bound Group:        ${whatsappService.getBoundGroupJid() || '(none)'}`);
+            lines.push(`Verbose Mode:       ${whatsappService.isVerbose() ? 'ON' : 'OFF'}`);
+
+            ctx.ui.notify(lines.join('\n'), 'info');
+        }
+    });
+
     // Handle outgoing messages (Agent -> WhatsApp)
     pi.on("agent_start", async (_event, _ctx) => {
-        if (sessionManager.getStatus() !== 'connected') return;
+        if (whatsappService.getEffectiveStatus() !== 'connected') return;
         const lastJid = whatsappService.getLastRemoteJid();
         if (lastJid) {
             await whatsappService.sendPresence(lastJid, 'composing');
@@ -364,7 +452,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     pi.on("message_end", async (event, ctx) => {
-        if (sessionManager.getStatus() !== 'connected') return;
+        if (whatsappService.getEffectiveStatus() !== 'connected') return;
 
         const { message } = event;
         // Only reply if it's the assistant and we have a valid target

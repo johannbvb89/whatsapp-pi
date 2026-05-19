@@ -107,6 +107,7 @@ interface BoomLikeError {
 export class WhatsAppService {
     private static readonly INITIAL_RECONNECT_DELAY_MS = 5_000;
     private static readonly MAX_RECONNECT_DELAY_MS = 120_000;
+    private static readonly HEALTH_CHECK_INTERVAL_MS = 30_000;
 
     private socket?: WhatsAppSocketLike;
     private sessionManager: SessionManager;
@@ -118,6 +119,7 @@ export class WhatsAppService {
     private saveCreds?: () => Promise<void>;
     private restoreBaileysConsoleFilter?: () => void;
     private reconnectTimeout?: ReturnType<typeof setTimeout>;
+    private healthCheckInterval?: ReturnType<typeof setInterval>;
     private intentionalStop = false;
     private onQRCode?: (qr: string) => void;
     private onMessage?: (m: MessagesUpsertEvent) => void;
@@ -125,6 +127,7 @@ export class WhatsAppService {
     private lastRemoteJid: string | null = null;
     private qrWasShown = false;
     private boundGroupJid: string | null = null;
+    private connectedAt?: number;
     private groupMetadataCache: Map<string, { id: string; subject: string; participants: Array<{ id: string }> }> = new Map();
 
     constructor(sessionManager: SessionManager) {
@@ -151,6 +154,11 @@ export class WhatsAppService {
         }
 
         return status;
+    }
+
+    public getUptimeMs(): number {
+        if (!this.connectedAt || this.getEffectiveStatus() !== 'connected') return 0;
+        return Date.now() - this.connectedAt;
     }
 
     public setIncomingMessageRecorder(callback: (message: IncomingMessage) => void | Promise<void>) {
@@ -254,7 +262,12 @@ export class WhatsAppService {
         this.isReconnecting = true;
         this.reconnectAttempts++;
         const delay = this.getReconnectDelayMs();
+        fileLog(`Connection lost — scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
         this.onStatusUpdate?.(t('service.whatsapp.reconnecting'));
+        void this.sessionManager.setConnectionState({
+            status: 'reconnecting',
+            reconnectAttempts: this.reconnectAttempts
+        });
         this.clearReconnectTimeout();
         this.reconnectTimeout = setTimeout(async () => {
             this.isReconnecting = false;
@@ -397,7 +410,7 @@ export class WhatsAppService {
     }
 
     private async handlePairingQr(qr: string) {
-        this.sessionManager.setStatus('pairing');
+        await this.sessionManager.setConnectionState({ status: 'pairing' });
         this.onQRCode?.(qr);
         this.onStatusUpdate?.(t('service.whatsapp.typeToConnect'));
         this.qrWasShown = true;
@@ -413,8 +426,16 @@ export class WhatsAppService {
         this.clearReconnectTimeout();
         await this.saveCreds?.();
         await this.sessionManager.markAuthStateAvailable();
-        this.sessionManager.setStatus('connected');
+        this.connectedAt = Date.now();
+        await this.sessionManager.setConnectionState({
+            status: 'connected',
+            lastError: undefined,
+            connectedSince: this.connectedAt,
+            reconnectAttempts: this.reconnectAttempts,
+            uptimeMs: 0
+        });
         this.onStatusUpdate?.(t('service.whatsapp.connected'));
+        this.startHealthCheck();
 
         if (this.qrWasShown) {
             this.qrWasShown = false;
@@ -488,7 +509,12 @@ export class WhatsAppService {
             this.cleanupSocket();
             this.isReconnecting = false;
             this.reconnectAttempts = 0;
-            await this.sessionManager.setStatus('disconnected');
+            this.stopHealthCheck();
+            await this.sessionManager.setConnectionState({
+                status: 'disconnected',
+                lastError: errorMessage || 'Session rejected',
+                lastErrorTime: Date.now()
+            });
             if (!isBadMac) {
                 this.onStatusUpdate?.(t('service.whatsapp.disconnected'));
             }
@@ -502,18 +528,25 @@ export class WhatsAppService {
             this.cleanupSocket();
             this.isReconnecting = false;
             this.reconnectAttempts = 0;
-            await this.sessionManager.setStatus('disconnected');
+            this.stopHealthCheck();
+            await this.sessionManager.setConnectionState({
+                status: 'disconnected',
+                lastError: 'Connection replaced by another device',
+                lastErrorTime: Date.now()
+            });
             this.onStatusUpdate?.(t('service.whatsapp.conflict'));
             return;
         }
 
         if (shouldReconnect && !this.isReconnecting) {
             await this.saveCreds?.();
+            this.stopHealthCheck();
             this.cleanupSocket();
             this.scheduleReconnect(options);
         } else if (!shouldReconnect) {
             this.reconnectAttempts = 0;
-            this.sessionManager.setStatus('logged-out');
+            this.stopHealthCheck();
+            await this.sessionManager.setConnectionState({ status: 'logged-out' });
             this.onStatusUpdate?.(t('service.whatsapp.disconnected'));
         }
     }
@@ -604,6 +637,8 @@ export class WhatsAppService {
 
         this.lastRemoteJid = remoteJid;
         this.onMessage?.(payload);
+        // Update last message received timestamp for diagnostics
+        void this.sessionManager.setConnectionState({ lastMessageReceived: Date.now() });
     }
 
     setQRCodeCallback(callback: (qr: string) => void) {
@@ -650,6 +685,33 @@ export class WhatsAppService {
             fileLog(`Cached group metadata for ${jid} (${metadata.participants?.length ?? 0} participants)`);
         } catch (error) {
             fileLog(`FAILED to fetch group metadata for ${jid}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
+     * Periodic health check — detects silent disconnects and triggers reconnect.
+     * Runs every HEALTH_CHECK_INTERVAL_MS while connected.
+     */
+    private startHealthCheck() {
+        this.stopHealthCheck();
+        this.healthCheckInterval = setInterval(() => {
+            const connected = !!this.socket && this.sessionManager.getStatus() === 'connected';
+            if (!connected && !this.intentionalStop && !this.isReconnecting) {
+                fileLog('[HealthCheck] Connection lost (no socket or status mismatch) — triggering reconnect...');
+                void this.sessionManager.setConnectionState({
+                    status: 'disconnected',
+                    lastError: 'Health check: socket not connected',
+                    lastErrorTime: Date.now()
+                });
+                this.scheduleReconnect({ allowPairingOnAuthFailure: false });
+            }
+        }, WhatsAppService.HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    private stopHealthCheck() {
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+            this.healthCheckInterval = undefined;
         }
     }
 
@@ -737,6 +799,8 @@ export class WhatsAppService {
 
     async stop() {
         this.intentionalStop = true;
+        this.stopHealthCheck();
+        this.connectedAt = undefined;
         try {
             await this.saveCreds?.();
         } catch (error) {
@@ -747,7 +811,11 @@ export class WhatsAppService {
 
         this.cleanupSocket();
         this.isReconnecting = false;
-        await this.sessionManager.setStatus('disconnected');
+        await this.sessionManager.setConnectionState({
+            status: 'disconnected',
+            lastError: undefined,
+            uptimeMs: 0
+        });
         this.onStatusUpdate?.(t('service.whatsapp.disconnected'));
     }
 }

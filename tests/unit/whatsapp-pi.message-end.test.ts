@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => {
         getStatus: vi.fn().mockReturnValue('connected'),
         getAllowList: vi.fn().mockReturnValue([]),
         getAllowedGroups: vi.fn().mockReturnValue([]),
-        setGroupJidForAuth: vi.fn()
+        setGroupJidForAuth: vi.fn(),
+        getConnectionState: vi.fn().mockReturnValue({ status: 'connected', reconnectAttempts: 0, uptimeMs: 0 }),
+        setConnectionState: vi.fn().mockResolvedValue(undefined)
     });
 
     const createWhatsAppService = () => ({
@@ -22,6 +24,7 @@ const mocks = vi.hoisted(() => {
         setGroupBinding: vi.fn(),
         getBoundGroupJid: vi.fn().mockReturnValue(null),
         getStatus: vi.fn().mockReturnValue('connected'),
+        getEffectiveStatus: vi.fn().mockReturnValue('connected'),
         isVerbose: vi.fn().mockReturnValue(false),
         start: vi.fn().mockResolvedValue(undefined),
         stop: vi.fn().mockResolvedValue(undefined),
@@ -195,7 +198,7 @@ describe('whatsapp-pi message_end handler', () => {
         const registerExtension = await loadExtension();
         const pi = createMockPi();
         const ctx = createMockContext();
-        mocks.sessionManager.getStatus.mockReturnValue('disconnected');
+        mocks.whatsappService.getEffectiveStatus.mockReturnValue('disconnected');
 
         registerExtension(pi as any);
         await pi.handlers.get('message_end')!(makeAssistantEvent('Hello'), ctx);
