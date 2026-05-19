@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { SessionManager } from './src/services/session.manager.js';
+import type { SessionStatus } from './src/models/whatsapp.types.js';
 import { WhatsAppService } from './src/services/whatsapp.service.js';
 import { MenuHandler } from './src/ui/menu.handler.js';
 import { RecentsService } from './src/services/recents.service.js';
@@ -92,10 +93,12 @@ export default function (pi: ExtensionAPI) {
         logger.log(`[WhatsApp-Pi] --whatsapp-pi-online: ${isWhatsappPiOn}`);
         logger.log(`[WhatsApp-Pi] --whatsapp-group: ${boundGroupJid || '(not set)'}`);
 
-        ctx.ui.setStatus('whatsapp', '| WhatsApp: Disconnected');
-        whatsappService.setStatusCallback((status) => {
-            ctx.ui.setStatus('whatsapp', status);
-        });
+        // Push initial status — uses getEffectiveStatus() which checks socket reality
+        const pushStatusToTui = (label: string) => {
+            ctx.ui.setStatus('whatsapp', label);
+        };
+        pushStatusToTui('| WhatsApp: Disconnected');
+        whatsappService.setStatusCallback(pushStatusToTui);
 
         // Set up group binding if configured
         if (boundGroupJid) {
@@ -144,10 +147,10 @@ export default function (pi: ExtensionAPI) {
         if (savedStateEntry) {
             const data = (savedStateEntry as { data?: any }).data;
             if (data.status) {
-                const restoredStatus = data.status === 'connected' && !(isWhatsappPiOn && registered)
+                const restoredStatus: SessionStatus = data.status === 'connected' && !(isWhatsappPiOn && registered)
                     ? 'disconnected'
                     : data.status;
-                await sessionManager.setStatus(restoredStatus);
+                await sessionManager.setConnectionState({ status: restoredStatus });
             }
             if (Array.isArray(data.allowList)) {
                 for (const n of data.allowList) {
@@ -491,5 +494,6 @@ export default function (pi: ExtensionAPI) {
     pi.on("session_shutdown", async () => {
         logger.log("[WhatsApp-Pi] Session shutdown detected. Stopping WhatsApp service...");
         await whatsappService.stop();
+        await sessionManager.flushPendingSave();
     });
 }

@@ -206,7 +206,7 @@ describe('whatsapp-pi extension', () => {
         expect(ctx.ui.setStatus).toHaveBeenCalledWith('whatsapp', '| WhatsApp: Disconnected');
         expect(mocks.sessionManager.ensureInitialized).toHaveBeenCalledOnce();
         expect(mocks.recentsService.ensureInitialized).toHaveBeenCalledOnce();
-        expect(mocks.sessionManager.setStatus).toHaveBeenCalledWith('disconnected');
+        expect(mocks.sessionManager.setConnectionState).toHaveBeenCalledWith({ status: 'disconnected' });
         expect(mocks.sessionManager.addNumber).toHaveBeenCalledWith('+5511999998888', 'Ana');
         expect(mocks.whatsappService.setIncomingMessageRecorder).toHaveBeenCalledOnce();
         expect(pi.exec).not.toHaveBeenCalled();
@@ -232,7 +232,7 @@ describe('whatsapp-pi extension', () => {
         registerExtension(pi as any);
         await pi.handlers.get('session_start')!({ reason: 'startup' }, ctx);
 
-        expect(mocks.sessionManager.setStatus).toHaveBeenCalledWith('connected');
+        expect(mocks.sessionManager.setConnectionState).toHaveBeenCalledWith({ status: 'connected' });
         expect(mocks.whatsappService.start).toHaveBeenCalledOnce();
     });
 
@@ -270,7 +270,7 @@ describe('whatsapp-pi extension', () => {
         registerExtension(pi as any);
         await pi.handlers.get('session_start')!({ reason: 'startup' }, ctx);
 
-        expect(mocks.sessionManager.setStatus).toHaveBeenCalledWith('disconnected');
+        expect(mocks.sessionManager.setConnectionState).toHaveBeenCalledWith({ status: 'disconnected' });
         expect(mocks.whatsappService.start).not.toHaveBeenCalled();
         expect(ctx.ui.notify).toHaveBeenCalledWith(
             'WhatsApp: Auto-connect requested, but no saved WhatsApp credentials were found. Use Connect WhatsApp once to scan the QR code.',

@@ -42,6 +42,9 @@ export class SessionManager {
     private openaiKey: string = '';
     private visionModel: string = 'gpt-4o';
     private operatorJid: string = '';
+    private _initPromise: Promise<void> | null = null;
+    private _saveTimer: ReturnType<typeof setTimeout> | null = null;
+    private _savePending = false;
 
     constructor(baseDir = join(homedir(), '.pi', 'whatsapp-pi')) {
         this.baseDir = baseDir;
@@ -55,12 +58,24 @@ export class SessionManager {
     }
 
     public async ensureInitialized() {
+        // Prevent concurrent initialization races
+        if (this._initPromise) {
+            return this._initPromise;
+        }
+        this._initPromise = (async () => {
+            try {
+                await this.ensureStorageDirectories();
+                await this.loadConfig();
+                await this.syncAuthStateFromDisk();
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                console.error(`[SessionManager] ensureInitialized FAILED: ${msg}`);
+            }
+        })();
         try {
-            await this.ensureStorageDirectories();
-            await this.loadConfig();
-            await this.syncAuthStateFromDisk();
-        } catch {
-            // Initialization is best-effort; callers can continue with defaults.
+            await this._initPromise;
+        } finally {
+            this._initPromise = null;
         }
     }
 
@@ -109,7 +124,7 @@ export class SessionManager {
             this.operatorJid = config.operatorJid || '';
 
             if (recovered) {
-                await this.saveConfig();
+                await this.flushConfig();
             }
         } catch {
             // File not found is fine
@@ -169,7 +184,31 @@ export class SessionManager {
         return -1;
     }
 
+    /**
+     * Debounced save — coalesces rapid writes within 200ms into a single flush.
+     * Callers that need guaranteed persistence (e.g. shutdown) use flushConfig().
+     */
     public async saveConfig() {
+        this._savePending = true;
+        if (this._saveTimer) {
+            return; // Already scheduled
+        }
+        this._saveTimer = setTimeout(() => {
+            this._saveTimer = null;
+            void this.flushConfig();
+        }, 200);
+    }
+
+    /**
+     * Immediate, non-debounced config write. Used by syncAuthStateFromDisk()
+     * and critical paths that must persist without delay.
+     */
+    private async flushConfig() {
+        this._savePending = false;
+        if (this._saveTimer) {
+            clearTimeout(this._saveTimer);
+            this._saveTimer = null;
+        }
         const tempPath = `${this.configPath}.${process.pid}.${Date.now()}.tmp`;
         try {
             this.hasAuthState = this.hasAuthState || await this.hasCredentialsFile();
@@ -201,6 +240,15 @@ export class SessionManager {
         } catch (error) {
             await rm(tempPath, { force: true }).catch(() => {});
             console.error(t('session.manager.failedSaveConfig'), error);
+        }
+    }
+
+    /**
+     * Ensures any pending debounced save is flushed. Call before shutdown.
+     */
+    async flushPendingSave(): Promise<void> {
+        if (this._savePending) {
+            await this.flushConfig();
         }
     }
 
@@ -391,9 +439,18 @@ export class SessionManager {
         return merged;
     }
 
+    /**
+     * Returns true if valid WhatsApp credentials (creds.json) exist on disk.
+     * Does NOT depend on config.json being loaded first — checks the file directly.
+     * This is the single source of truth for "can we auto-connect?".
+     */
     public async isRegistered(): Promise<boolean> {
-        await this.syncAuthStateFromDisk();
-        return this.hasAuthState;
+        const fileExists = await this.hasCredentialsFile();
+        // Sync internal state if it drifted
+        if (fileExists !== this.hasAuthState) {
+            this.hasAuthState = fileExists;
+        }
+        return fileExists;
     }
 
     async markAuthStateAvailable() {
@@ -419,7 +476,7 @@ export class SessionManager {
         if (nextHasAuthState !== this.hasAuthState || nextStatus !== currentStatus) {
             this.hasAuthState = nextHasAuthState;
             this.connectionState.status = nextStatus;
-            await this.saveConfig();
+            await this.flushConfig();
         }
     }
 
@@ -453,10 +510,9 @@ export class SessionManager {
         return { ...this.connectionState };
     }
 
-    /** Update connection state partially and persist */
+    /** Update connection state partially and persist (debounced) */
     async setConnectionState(partial: Partial<ConnectionState>) {
         this.connectionState = { ...this.connectionState, ...partial };
-        // Don't await — fire-and-forget persistence for performance
         void this.saveConfig();
     }
 
@@ -468,7 +524,7 @@ export class SessionManager {
     /** @deprecated Use setConnectionState() for full diagnostics */
     async setStatus(status: SessionStatus) {
         this.connectionState.status = status;
-        await this.saveConfig();
+        await this.flushConfig();
     }
 
     getOpenaiKey(): string {
