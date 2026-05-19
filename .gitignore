@@ -27,6 +27,19 @@ Thumbs.db
 .pi/taskplane.json
 .pi/agents/
 
+# Internal audit/planning docs — kept locally, not for upstream PR
+CRITICAL-REVIEW.md
+PR.md
+REVIEW-CHECKLIST.md
+REVIEW-DEPLOYMENT.md
+REVIEW-PLAN.md
+SHARE-GUIDE.md
+STRATEGY-v2-rebase.md
+TEST-GAP-ANALYSIS.md
+TEST-STRATEGY.md
+MANUAL-TEST-v2.md
+PLAN-*.md
+
 # Pi Extension Data
 .pi/extensions/whatsapp/auth/
 .pi-data/
