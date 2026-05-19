@@ -127,6 +127,7 @@ export class RecentsService {
 
     private stripSpecialCharacters(text: string): string {
         return text
+            // eslint-disable-next-line no-misleading-character-class
             .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200D\uFE0F]/gu, '')
             .replace(/\s+/g, ' ')
             .trim();
